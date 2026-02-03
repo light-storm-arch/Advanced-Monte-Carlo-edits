@@ -1598,15 +1598,15 @@ function App() {
       for (let y = 0; y <= planLength; y++) {
         chartData.push({ year: currentYear + y, p10: mainResult.percentilePaths.p10[y], p25: mainResult.percentilePaths.p25[y], p50: mainResult.percentilePaths.p50[y], p75: mainResult.percentilePaths.p75[y], p90: mainResult.percentilePaths.p90[y] });
       }
-      // Compute survivor spending ratio for guardrail display
-      const effSurvivorSpending = filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null;
-      const survivorRatio = (effSurvivorSpending != null && baseSpending > 0) ? effSurvivorSpending / baseSpending : null;
+      // Compute survivor spending ratio for guardrail display (only if different from base)
+      const hasDifferentSurvivorSpending = filingStatus === 'mfj' && survivorSpending !== null && survivorSpending !== baseSpending;
+      const survivorRatio = hasDifferentSurvivorSpending && baseSpending > 0 ? survivorSpending / baseSpending : null;
       setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, survivorRatio, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails });
       setIsCalculating(false);
     }, 100);
   }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
 
-  const exportPDF = () => { if (results) generatePDF({ currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn: expectedReturn / 100, stdDev: stdDev / 100, assetAllocations, baseInflation: baseInflation / 100, baseSpending, survivorSpending: filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null, targetSuccessRate: targetSuccessRate / 100, upperGuardrail: upperGuardrail / 100, lowerGuardrail: lowerGuardrail / 100, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction }, results); };
+  const exportPDF = () => { if (results) generatePDF({ currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn: expectedReturn / 100, stdDev: stdDev / 100, assetAllocations, baseInflation: baseInflation / 100, baseSpending, survivorSpending: filingStatus === 'mfj' && survivorSpending !== null && survivorSpending !== baseSpending ? survivorSpending : null, targetSuccessRate: targetSuccessRate / 100, upperGuardrail: upperGuardrail / 100, lowerGuardrail: lowerGuardrail / 100, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction }, results); };
 
   // Export verification details table to PDF
   const exportVerificationPDF = (percentile) => {
