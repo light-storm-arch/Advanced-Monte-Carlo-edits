@@ -743,7 +743,7 @@ const PercentageInputNullable = ({ value, onChange, placeholder }) => {
 };
 
 const runSimulation = (params, numSims) => {
-  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
+  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
   const results = [], allPaths = [];
   const totalPortfolio = preTaxBalance + rothBalance + taxableBalance;
   
@@ -950,13 +950,15 @@ const runSimulation = (params, numSims) => {
       const c2Age = (filingStatus === 'mfj' && client2Alive) ? (client2Age || clientAge) + year : 0;
       
       // Calculate after-tax spending need
+      // Use survivor spending when in survivor mode and survivorSpending is provided
+      const effectiveBaseSpending = (survivorMode && survivorSpending != null) ? survivorSpending : baseSpending;
       let yearSpending;
       if (year === 0) {
-        yearSpending = baseSpending;
+        yearSpending = effectiveBaseSpending;
       } else if (spendingMode === 'smile') {
-        yearSpending = inflateSpendingSmile(baseSpending, baseInflation, currentYear, calYear, phase2Year, phase2Reduction, phase3Year, phase3Reduction);
+        yearSpending = inflateSpendingSmile(effectiveBaseSpending, baseInflation, currentYear, calYear, phase2Year, phase2Reduction, phase3Year, phase3Reduction);
       } else {
-        yearSpending = inflateValue(baseSpending, baseInflation, year);
+        yearSpending = inflateValue(effectiveBaseSpending, baseInflation, year);
       }
       
       // Use cached goals for this year
@@ -1232,20 +1234,23 @@ const findSpendingForSuccessRate = (params, pv, targetRate, numSims) => {
     client1Roth: (params.client1Roth || 0) * scale,
     client2Roth: (params.client2Roth || 0) * scale
   };
+  // Compute survivor spending ratio so it scales proportionally with base spending
+  const survivorRatio = (params.survivorSpending != null && params.baseSpending > 0) ? params.survivorSpending / params.baseSpending : null;
   // Upper limit based on portfolio value (e.g., 20% of portfolio as max reasonable spending)
   let low = 0, high = Math.max(params.baseSpending * 10, pv * 0.2);
-  for (let i = 0; i < 15; i++) { 
-    const mid = (low + high) / 2; 
-    const r = runSimulation({ ...scaledParams, baseSpending: mid }, Math.min(numSims, 2000)); 
-    if (Math.abs(r.successRate - targetRate) < 0.005) return mid; 
-    if (r.successRate > targetRate) low = mid; else high = mid; 
+  for (let i = 0; i < 15; i++) {
+    const mid = (low + high) / 2;
+    const scaledSurvivor = survivorRatio != null ? mid * survivorRatio : null;
+    const r = runSimulation({ ...scaledParams, baseSpending: mid, survivorSpending: scaledSurvivor }, Math.min(numSims, 2000));
+    if (Math.abs(r.successRate - targetRate) < 0.005) return mid;
+    if (r.successRate > targetRate) low = mid; else high = mid;
   }
   return (low + high) / 2;
 };
 
 const generatePDF = (inputs, results) => {
-  const { currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn, stdDev, assetAllocations, baseInflation, baseSpending, targetSuccessRate, upperGuardrail, lowerGuardrail, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction } = inputs;
-  const { currentSuccess, upperGuardrailPortfolio, upperGuardrailSpending, lowerGuardrailPortfolio, lowerGuardrailSpending, percentileEnding } = results;
+  const { currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn, stdDev, assetAllocations, baseInflation, baseSpending, survivorSpending, targetSuccessRate, upperGuardrail, lowerGuardrail, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction } = inputs;
+  const { currentSuccess, upperGuardrailPortfolio, upperGuardrailSpending, lowerGuardrailPortfolio, lowerGuardrailSpending, survivorRatio, percentileEnding } = results;
   
   const filingStatusLabels = { single: 'Single', mfj: 'Married Filing Jointly', hoh: 'Head of Household' };
   const accountTypeLabels = { pretax: 'Pre-Tax (401k/IRA)', roth: 'Roth', taxable: 'Taxable (Brokerage)' };
@@ -1312,6 +1317,7 @@ const generatePDF = (inputs, results) => {
   // Financial Assumptions
   html += '<h2>Financial Assumptions</h2>';
   html += '<div class="grid-2"><div class="card"><div class="assumptions-row"><span>Base Annual Spending (After-Tax)</span><strong>' + formatCurrency(baseSpending) + '</strong></div>';
+  if (survivorSpending != null) html += '<div class="assumptions-row"><span>Survivor Annual Spending (After-Tax)</span><strong>' + formatCurrency(survivorSpending) + '</strong></div>';
   html += '<div class="assumptions-row"><span>Portfolio Geometric Return</span><strong>' + (expectedReturn * 100).toFixed(2) + '%</strong></div>';
   html += '<div class="assumptions-row"><span>Portfolio Std Deviation</span><strong>' + (stdDev * 100).toFixed(2) + '%</strong></div>';
   html += '<div class="assumptions-row"><span>Base Inflation Rate</span><strong>' + (baseInflation * 100).toFixed(2) + '%</strong></div>';
@@ -1376,8 +1382,8 @@ const generatePDF = (inputs, results) => {
   html += '<div class="card" style="text-align:center"><div class="label">90th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p90) + '</div></div></div>';
   
   // Guardrails
-  html += '<h2>Guardrail Analysis</h2><div class="grid-2"><div class="card" style="border-left-color:#4caf50"><div class="label">Upper Guardrail (' + (upperGuardrail * 100).toFixed(0) + '% Success)</div><div class="assumptions-row"><span>Portfolio Value</span><strong>' + formatCurrency(upperGuardrailPortfolio) + '</strong></div><div class="assumptions-row"><span>New Base Spending</span><strong>' + formatCurrency(upperGuardrailSpending) + '</strong></div><div class="assumptions-row"><span>Spending Change</span><strong style="color:#4caf50">+' + formatCurrency(upperGuardrailSpending - baseSpending) + '</strong></div></div>';
-  html += '<div class="card" style="border-left-color:#ff9800"><div class="label">Lower Guardrail (' + (lowerGuardrail * 100).toFixed(0) + '% Success)</div><div class="assumptions-row"><span>Portfolio Value</span><strong>' + formatCurrency(lowerGuardrailPortfolio) + '</strong></div><div class="assumptions-row"><span>New Base Spending</span><strong>' + formatCurrency(lowerGuardrailSpending) + '</strong></div><div class="assumptions-row"><span>Spending Change</span><strong style="color:#ff9800">' + formatCurrency(lowerGuardrailSpending - baseSpending) + '</strong></div></div></div>';
+  html += '<h2>Guardrail Analysis</h2><div class="grid-2"><div class="card" style="border-left-color:#4caf50"><div class="label">Upper Guardrail (' + (upperGuardrail * 100).toFixed(0) + '% Success)</div><div class="assumptions-row"><span>Portfolio Value</span><strong>' + formatCurrency(upperGuardrailPortfolio) + '</strong></div><div class="assumptions-row"><span>New Base Spending</span><strong>' + formatCurrency(upperGuardrailSpending) + '</strong></div>' + (survivorRatio != null ? '<div class="assumptions-row"><span>Survivor Spending</span><strong>' + formatCurrency(upperGuardrailSpending * survivorRatio) + '</strong></div>' : '') + '<div class="assumptions-row"><span>Spending Change</span><strong style="color:#4caf50">+' + formatCurrency(upperGuardrailSpending - baseSpending) + '</strong></div></div>';
+  html += '<div class="card" style="border-left-color:#ff9800"><div class="label">Lower Guardrail (' + (lowerGuardrail * 100).toFixed(0) + '% Success)</div><div class="assumptions-row"><span>Portfolio Value</span><strong>' + formatCurrency(lowerGuardrailPortfolio) + '</strong></div><div class="assumptions-row"><span>New Base Spending</span><strong>' + formatCurrency(lowerGuardrailSpending) + '</strong></div>' + (survivorRatio != null ? '<div class="assumptions-row"><span>Survivor Spending</span><strong>' + formatCurrency(lowerGuardrailSpending * survivorRatio) + '</strong></div>' : '') + '<div class="assumptions-row"><span>Spending Change</span><strong style="color:#ff9800">' + formatCurrency(lowerGuardrailSpending - baseSpending) + '</strong></div></div></div>';
   
   // Disclaimer
   html += '<div style="margin-top:40px;padding:20px;border:1px solid #ccc;border-radius:8px;background:#f9f9f9"><p style="font-size:11px;color:#666;margin:0;line-height:1.5"><strong>IMPORTANT DISCLOSURE:</strong> The projections and analysis contained in this report are hypothetical in nature, do not reflect actual investment results, and are not guarantees of future results. This analysis is based on assumptions that may not reflect actual market conditions or your personal financial situation. Actual results will vary and may be significantly different from these projections. Monte Carlo simulations show a range of possible outcomes based on historical data and assumptions about future returns, inflation, and taxes. Past performance is not indicative of future results. This report is for informational purposes only and should not be considered investment, tax, or legal advice.</p></div>';
@@ -1473,6 +1479,7 @@ function App() {
 
   const [baseInflation, setBaseInflation] = useState(2.5);
   const [baseSpending, setBaseSpending] = useState(40000);
+  const [survivorSpending, setSurvivorSpending] = useState(null);
   const [targetSuccessRate, setTargetSuccessRate] = useState(80);
   const [upperGuardrail, setUpperGuardrail] = useState(90);
   const [lowerGuardrail, setLowerGuardrail] = useState(70);
@@ -1517,7 +1524,8 @@ function App() {
         client1PreTax, client2PreTax, client1Roth, client2Roth,
         stockAllocation: stockAllocation / 100, filingStatus, stateTaxRate: stateTaxRate / 100,
         planLength, assetWeights, choleskyL: CHOLESKY_L,
-        baseSpending, baseInflation: baseInflation / 100, goals, incomeSources,
+        baseSpending, survivorSpending: filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null,
+        baseInflation: baseInflation / 100, goals, incomeSources,
         currentYear, clientAge, client1Age, client2Age: filingStatus === 'mfj' ? client2Age : 0,
         client1PlanLength, client2PlanLength: filingStatus === 'mfj' ? client2PlanLength : client1PlanLength,
         spendingMode,
@@ -1555,12 +1563,15 @@ function App() {
       for (let y = 0; y <= planLength; y++) {
         chartData.push({ year: currentYear + y, p10: mainResult.percentilePaths.p10[y], p25: mainResult.percentilePaths.p25[y], p50: mainResult.percentilePaths.p50[y], p75: mainResult.percentilePaths.p75[y], p90: mainResult.percentilePaths.p90[y] });
       }
-      setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails });
+      // Compute survivor spending ratio for guardrail display
+      const effSurvivorSpending = filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null;
+      const survivorRatio = (effSurvivorSpending != null && baseSpending > 0) ? effSurvivorSpending / baseSpending : null;
+      setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, survivorRatio, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails });
       setIsCalculating(false);
     }, 100);
-  }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
+  }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
 
-  const exportPDF = () => { if (results) generatePDF({ currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn: expectedReturn / 100, stdDev: stdDev / 100, assetAllocations, baseInflation: baseInflation / 100, baseSpending, targetSuccessRate: targetSuccessRate / 100, upperGuardrail: upperGuardrail / 100, lowerGuardrail: lowerGuardrail / 100, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction }, results); };
+  const exportPDF = () => { if (results) generatePDF({ currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn: expectedReturn / 100, stdDev: stdDev / 100, assetAllocations, baseInflation: baseInflation / 100, baseSpending, survivorSpending: filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null, targetSuccessRate: targetSuccessRate / 100, upperGuardrail: upperGuardrail / 100, lowerGuardrail: lowerGuardrail / 100, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction }, results); };
 
   // Export verification details table to PDF
   const exportVerificationPDF = (percentile) => {
@@ -1996,6 +2007,7 @@ function App() {
             <h2 className="font-display text-xl font-semibold mb-5 text-amber-200">Spending & Guardrails</h2>
             <div className="space-y-4">
               <div><label className="block text-sm text-slate-400 mb-2">Base Annual Spending (After-Tax)</label><CurrencyInput value={baseSpending} onChange={setBaseSpending} /></div>
+              {filingStatus === 'mfj' && <div><label className="block text-sm text-slate-400 mb-2">Survivor Annual Spending (After-Tax)</label><CurrencyInput value={survivorSpending !== null ? survivorSpending : baseSpending} onChange={(v) => setSurvivorSpending(v)} /><p className="text-xs text-slate-500 mt-1">Spending after one spouse passes. Defaults to base spending if unchanged.</p></div>}
               <div><label className="block text-sm text-slate-400 mb-2">Target Success Rate (%)</label><PercentageInput value={targetSuccessRate} onChange={setTargetSuccessRate} /></div>
               <div><label className="block text-sm text-slate-400 mb-2">Upper Guardrail (%)</label><PercentageInput value={upperGuardrail} onChange={setUpperGuardrail} /></div>
               <div><label className="block text-sm text-slate-400 mb-2">Lower Guardrail (%)</label><PercentageInput value={lowerGuardrail} onChange={setLowerGuardrail} /></div>
@@ -2275,6 +2287,7 @@ function App() {
                 <div className="space-y-2">
                   <div className="flex justify-between"><span className="text-slate-300">Portfolio:</span><span className="font-semibold text-green-200">{formatCurrency(results.upperGuardrailPortfolio)}</span></div>
                   <div className="flex justify-between"><span className="text-slate-300">New Spending:</span><span className="font-semibold text-green-200">{formatCurrency(results.upperGuardrailSpending)}</span></div>
+                  {results.survivorRatio != null && <div className="flex justify-between"><span className="text-slate-300">Survivor Spending:</span><span className="font-semibold text-green-200">{formatCurrency(results.upperGuardrailSpending * results.survivorRatio)}</span></div>}
                   <div className="flex justify-between pt-2 border-t border-green-500/20"><span className="text-slate-400 text-sm">Change:</span><span className="font-semibold text-green-300">+{formatCurrency(results.upperGuardrailSpending - baseSpending)}</span></div>
                 </div>
               </div>
@@ -2283,6 +2296,7 @@ function App() {
                 <div className="space-y-2">
                   <div className="flex justify-between"><span className="text-slate-300">Portfolio:</span><span className="font-semibold text-orange-200">{formatCurrency(results.lowerGuardrailPortfolio)}</span></div>
                   <div className="flex justify-between"><span className="text-slate-300">New Spending:</span><span className="font-semibold text-orange-200">{formatCurrency(results.lowerGuardrailSpending)}</span></div>
+                  {results.survivorRatio != null && <div className="flex justify-between"><span className="text-slate-300">Survivor Spending:</span><span className="font-semibold text-orange-200">{formatCurrency(results.lowerGuardrailSpending * results.survivorRatio)}</span></div>}
                   <div className="flex justify-between pt-2 border-t border-orange-500/20"><span className="text-slate-400 text-sm">Change:</span><span className="font-semibold text-orange-300">{formatCurrency(results.lowerGuardrailSpending - baseSpending)}</span></div>
                 </div>
               </div>
