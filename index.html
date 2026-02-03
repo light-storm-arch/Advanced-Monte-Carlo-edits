@@ -207,8 +207,9 @@ const calculateUnifiedWithdrawal = (spendingNeed, totalIncome, taxParams) => {
   const topOf12Bracket = cachedTopOf12 || getTopOf12PercentBracket(filingStatus, baseInflation, yearsFromStart);
   
   // Calculate RMDs (mandatory regardless of spending need)
+  // Always calculate both - deceased spouse will have age=0 and balance=0, so RMD=0
   const client1RMD = calculateRMD(client1Age, client1PreTax);
-  const client2RMD = filingStatus === 'mfj' ? calculateRMD(client2Age, client2PreTax) : 0;
+  const client2RMD = calculateRMD(client2Age, client2PreTax);
   const totalRMD = client1RMD + client2RMD;
   
   // Calculate taxable account income (dividends and interest) - always generated
@@ -334,8 +335,9 @@ const calculateOptimizedWithdrawal = (targetAfterTax, accountBalances, taxParams
   const topOf12Bracket = cachedTopOf12 || getTopOf12PercentBracket(filingStatus, baseInflation, yearsFromStart);
   
   // Step 1: Calculate RMDs (mandatory pre-tax withdrawals)
+  // Always calculate both - deceased spouse will have age=0 and balance=0, so RMD=0
   const client1RMD = calculateRMD(client1Age, client1PreTax);
-  const client2RMD = filingStatus === 'mfj' ? calculateRMD(client2Age, client2PreTax) : 0;
+  const client2RMD = calculateRMD(client2Age, client2PreTax);
   const totalRMD = client1RMD + client2RMD;
   
   // Step 2: Calculate taxable account income (dividends and interest)
