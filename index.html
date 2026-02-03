@@ -45,6 +45,9 @@
   <script type="text/babel">
 const { useState, useCallback, useEffect } = React;
 
+// =============================================================================
+// CONSTANTS: Tax Tables
+// =============================================================================
 // 2026 Tax Brackets (will be inflated each year)
 const TAX_BRACKETS_2026 = {
   single: [
@@ -97,6 +100,9 @@ const CAPITAL_GAINS_BRACKETS_2026 = {
 
 const STANDARD_DEDUCTION_2026 = { single: 16100, mfj: 32200, hoh: 24150 };
 
+// =============================================================================
+// CONSTANTS: RMD Tables
+// =============================================================================
 // IRS Uniform Lifetime Table for RMDs (SECURE 2.0 - starts at age 73)
 const UNIFORM_LIFETIME_TABLE = {
   73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9, 78: 22.0, 79: 21.1, 80: 20.2,
@@ -107,6 +113,9 @@ const UNIFORM_LIFETIME_TABLE = {
   113: 3.1, 114: 3.0, 115: 2.9, 116: 2.8, 117: 2.7, 118: 2.5, 119: 2.3, 120: 2.0
 };
 
+// =============================================================================
+// UTILITIES: RMD & Tax Bracket Functions
+// =============================================================================
 // Calculate RMD for a given age and account balance
 const calculateRMD = (age, preTaxBalance) => {
   if (age < 73 || preTaxBalance <= 0) return 0;
@@ -146,6 +155,9 @@ const getTopOf12PercentBracket = (filingStatus, baseInflation, yearsFromStart) =
   return bracket12 ? bracket12.max : 0;
 };
 
+// =============================================================================
+// TAX CALCULATIONS: Federal, State, Capital Gains, Withdrawals
+// =============================================================================
 // Calculate federal tax on ordinary income
 const calculateFederalTax = (taxableIncome, brackets) => {
   if (taxableIncome <= 0) return 0;
@@ -572,7 +584,9 @@ const calculateGrossWithdrawal = (targetAfterTax, accounts, taxParams) => {
   return result;
 };
 
-// ============ Asset Class Constants ============
+// =============================================================================
+// CONSTANTS: Asset Classes & Correlation Matrix
+// =============================================================================
 const ASSET_CLASSES = [
   'Cash', 'Short-term Bonds', 'Intermediate-term Bonds', 'Long-term Bonds',
   'Large Cap Value Stocks', 'Large Cap Growth Stocks', 'Mid Cap Stocks',
@@ -597,6 +611,9 @@ const ASSET_CORR_MATRIX = [
 ];
 const NUM_ASSETS = ASSET_CLASSES.length;
 
+// =============================================================================
+// UTILITIES: Matrix Math & Return Generation
+// =============================================================================
 // Cholesky decomposition: returns lower triangular matrix L such that L*L^T = A
 // Returns null if matrix is not positive-definite
 const choleskyDecomposition = (matrix) => {
@@ -703,6 +720,10 @@ const logNormalReturn = (geometricMean, arithmeticStdDev, z) => {
   // Generate log-normal return
   return Math.exp(logMean + logStdDev * z) - 1;
 };
+
+// =============================================================================
+// UTILITIES: Formatting & Inflation
+// =============================================================================
 const formatCurrency = (v) => v == null || isNaN(v) ? '$0' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 const formatNumberWithCommas = (v) => v == null || v === '' ? '' : v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const inflateValue = (base, rate, years) => base * Math.pow(1 + rate, years);
@@ -722,6 +743,9 @@ const inflateSpendingSmile = (base, baseInflation, currentYear, calYear, phase2Y
   return spending;
 };
 
+// =============================================================================
+// REACT COMPONENTS: Input Controls
+// =============================================================================
 const CurrencyInput = ({ value, onChange }) => {
   const [display, setDisplay] = useState(formatNumberWithCommas(value));
   const handleChange = (e) => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) { setDisplay(formatNumberWithCommas(raw)); onChange(parseInt(raw, 10) || 0); } };
@@ -744,6 +768,9 @@ const PercentageInputNullable = ({ value, onChange, placeholder }) => {
   return <input type="text" value={display} onChange={handleChange} onBlur={() => { if (display === '') onChange(null); else { const n = parseFloat(display); setDisplay(isNaN(n) ? (value !== null ? (value * 100).toString() : '') : n.toString()); } }} placeholder={placeholder} />;
 };
 
+// =============================================================================
+// SIMULATION ENGINE: Monte Carlo & Guardrail Analysis
+// =============================================================================
 const runSimulation = (params, numSims) => {
   const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
   const results = [], allPaths = [];
@@ -1250,6 +1277,9 @@ const findSpendingForSuccessRate = (params, pv, targetRate, numSims) => {
   return (low + high) / 2;
 };
 
+// =============================================================================
+// EXPORT: PDF/HTML Report Generation
+// =============================================================================
 const generatePDF = (inputs, results) => {
   const { currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn, stdDev, assetAllocations, baseInflation, baseSpending, survivorSpending, targetSuccessRate, upperGuardrail, lowerGuardrail, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction } = inputs;
   const { currentSuccess, upperGuardrailPortfolio, upperGuardrailSpending, lowerGuardrailPortfolio, lowerGuardrailSpending, survivorRatio, percentileEnding } = results;
@@ -1396,6 +1426,9 @@ const generatePDF = (inputs, results) => {
   link.href = url; link.download = 'Financial_Plan.html'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
 };
 
+// =============================================================================
+// REACT COMPONENTS: Main Application
+// =============================================================================
 function App() {
   const [currentYear, setCurrentYear] = useState(2026);
   
