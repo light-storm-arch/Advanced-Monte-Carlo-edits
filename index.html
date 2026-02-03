@@ -533,7 +533,10 @@ const calculateWithdrawalAllocation = (
   // Calculate excess RMD (if RMD > spending need, excess reinvested to taxable)
   // Filter out tiny amounts (<$100) as rounding noise
   const excessRMD = Math.max(0, totalRMD - grossWithdrawal);
-  const rawExcessRMDAfterTax = excessRMD > 0 ? excessRMD - (excessRMD / actualGrossWithdrawal * totalTax) : 0;
+  // Guard against division by zero when actualGrossWithdrawal is 0
+  const rawExcessRMDAfterTax = excessRMD > 0 && actualGrossWithdrawal > 0
+    ? excessRMD - (excessRMD / actualGrossWithdrawal * totalTax)
+    : 0;
   const excessRMDAfterTax = rawExcessRMDAfterTax > 100 ? rawExcessRMDAfterTax : 0;
   
   return {
@@ -930,19 +933,23 @@ const runSimulation = (params, numSims) => {
     for (let year = 0; year < planLength; year++) {
       const calYear = currentYear + year;
       const startBalance = totalBalance();
-      
+
       // Check for survivor transition (MFJ only)
       // Year index is 0-based, so year 30 means we've completed 30 years
       const client1Alive = year < client1EndYear;
       const client2Alive = filingStatus === 'mfj' ? year < client2EndYear : false;
-      
+
       // Determine current filing status for this year
+      // IRS allows widow/widower to file MFJ for the year of death, then single thereafter
       let currentFilingStatus = filingStatus;
       let currentSurvivor = null;
-      
+
       if (filingStatus === 'mfj') {
         if (!client1Alive && client2Alive) {
-          currentFilingStatus = 'single';
+          // Client 1 has died, Client 2 is survivor
+          // Use MFJ for year of death (first year not alive), single thereafter
+          const deathYear = client1EndYear;
+          currentFilingStatus = year === deathYear ? 'mfj' : 'single';
           currentSurvivor = 'client2';
           // Transfer Client 1's accounts to Client 2 on first year of survivor mode
           if (!survivorMode || survivor !== 'client2') {
@@ -954,7 +961,10 @@ const runSimulation = (params, numSims) => {
             survivor = 'client2';
           }
         } else if (client1Alive && !client2Alive) {
-          currentFilingStatus = 'single';
+          // Client 2 has died, Client 1 is survivor
+          // Use MFJ for year of death (first year not alive), single thereafter
+          const deathYear = client2EndYear;
+          currentFilingStatus = year === deathYear ? 'mfj' : 'single';
           currentSurvivor = 'client1';
           // Transfer Client 2's accounts to Client 1 on first year of survivor mode
           if (!survivorMode || survivor !== 'client1') {
@@ -1537,7 +1547,11 @@ function App() {
   const clientAge = client1Age; // Primary client age for calculations
 
   const addGoal = () => setGoals([...goals, { id: Date.now(), name: '', amount: 0, startYear: currentYear, goalType: 'onetime', frequency: '', endYear: currentYear + planLength, continueThrough: true, customInflation: null }]);
-  const updateGoal = (id, field, value) => setGoals(goals.map(g => g.id === id ? { ...g, [field]: value } : g));
+  const updateGoal = (id, field, value) => {
+    // Ensure goal amounts are never negative
+    const sanitizedValue = field === 'amount' ? Math.max(0, value) : value;
+    setGoals(goals.map(g => g.id === id ? { ...g, [field]: sanitizedValue } : g));
+  };
   const removeGoal = (id) => setGoals(goals.filter(g => g.id !== id));
   const addIncomeSource = () => setIncomeSources([...incomeSources, { id: Date.now(), name: '', amount: 0, startYear: currentYear, endYear: currentYear + planLength, continueThrough: true, customInflation: null, isTaxFree: false, isSocialSecurity: false, owner: 'joint' }]);
   const updateIncomeSource = (id, field, value) => setIncomeSources(incomeSources.map(i => i.id === id ? { ...i, [field]: value } : i));
