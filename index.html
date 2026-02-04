@@ -596,8 +596,8 @@ const ASSET_CLASSES = [
   'Small Cap Stocks', "Int'l Developed Stocks", "Int'l Emerging Stocks",
   'REITs', 'Commodities'
 ];
-const ASSET_RETURNS = [0.0330, 0.0400, 0.0450, 0.0500, 0.0700, 0.0700, 0.0710, 0.0730, 0.0750, 0.0830, 0.0620, 0.0400]; // geometric (compound) returns
-const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22];
+const ASSET_RETURNS = [0.0330, 0.0400, 0.0450, 0.0500, 0.0700, 0.0700, 0.0710, 0.0730, 0.0750, 0.0830, 0.0620, 0.0400]; // geometric (compound) returns - converted to arithmetic in generateReturn
+const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22]; // arithmetic standard deviations
 const ASSET_CORR_MATRIX = [
   [1.00, 0.40, 0.10, 0.00,-0.05,-0.05,-0.10,-0.10, 0.00, 0.00,-0.10, 0.10],
   [0.40, 1.00, 0.40, 0.50, 0.00, 0.00, 0.00,-0.10, 0.20, 0.10, 0.10, 0.00],
@@ -706,22 +706,24 @@ const ASSET_CORR_FIXED = ensurePositiveDefinite(ASSET_CORR_MATRIX);
 const CHOLESKY_L = choleskyDecomposition(ASSET_CORR_FIXED);
 if (!CHOLESKY_L) console.error('Failed to compute Cholesky decomposition of asset correlation matrix!');
 
-// Log-normal return generator: takes geometric (compound) mean and arithmetic stdDev
+// Normal return generator: takes geometric (compound) mean and arithmetic stdDev
+// Converts geometric to arithmetic mean, then generates normally distributed return
 // If z is provided, uses it directly; otherwise generates via Box-Muller
-const logNormalReturn = (geometricMean, arithmeticStdDev, z) => {
+const generateReturn = (geometricMean, arithmeticStdDev, z) => {
   // Generate standard normal random number (Box-Muller) if not provided
   if (z === undefined) {
     const u1 = Math.random(), u2 = Math.random();
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
-  // Geometric mean maps directly to log-space mean: logMean = ln(1 + g)
-  const logMean = Math.log(1 + geometricMean);
-  // Convert arithmetic stdDev to log-space stdDev
-  const logStdDev = Math.sqrt(Math.log(1 + Math.pow(arithmeticStdDev / (1 + geometricMean), 2)));
+  // Convert geometric mean to arithmetic mean: arithmetic = geometric + σ²/2
+  const arithmeticMean = geometricMean + (arithmeticStdDev * arithmeticStdDev) / 2;
 
-  // Generate log-normal return
-  return Math.exp(logMean + logStdDev * z) - 1;
+  // Generate normally distributed return
+  const rawReturn = arithmeticMean + arithmeticStdDev * z;
+
+  // Clamp at -99% to prevent impossible returns (can't lose more than you have)
+  return Math.max(-0.99, rawReturn);
 };
 
 // =============================================================================
@@ -1037,7 +1039,7 @@ const runSimulation = (params, numSims) => {
       let yearReturn = 0;
       for (let i = 0; i < NUM_ASSETS; i++) {
         if (assetWeights[i] > 0) {
-          yearReturn += assetWeights[i] * logNormalReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
+          yearReturn += assetWeights[i] * generateReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
         }
       }
       const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
