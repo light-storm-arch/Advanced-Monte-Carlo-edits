@@ -1041,15 +1041,16 @@ const runSimulation = (params, numSims) => {
         }
       }
 
+      // DIAGNOSTIC TEST: σ²/2 adjustment temporarily disabled
       // Apply portfolio-level σ²/2 adjustment to convert geometric to arithmetic mean
       // This must be done at portfolio level (not per-asset) to correctly account for diversification
-      let portfolioVariance = 0;
-      for (let i = 0; i < NUM_ASSETS; i++) {
-        for (let j = 0; j < NUM_ASSETS; j++) {
-          portfolioVariance += assetWeights[i] * assetWeights[j] * ASSET_STDDEVS[i] * ASSET_STDDEVS[j] * ASSET_CORR_FIXED[i][j];
-        }
-      }
-      yearReturn += portfolioVariance / 2;
+      // let portfolioVariance = 0;
+      // for (let i = 0; i < NUM_ASSETS; i++) {
+      //   for (let j = 0; j < NUM_ASSETS; j++) {
+      //     portfolioVariance += assetWeights[i] * assetWeights[j] * ASSET_STDDEVS[i] * ASSET_STDDEVS[j] * ASSET_CORR_FIXED[i][j];
+      //   }
+      // }
+      // yearReturn += portfolioVariance / 2;
 
       const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
       
