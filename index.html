@@ -707,7 +707,7 @@ const CHOLESKY_L = choleskyDecomposition(ASSET_CORR_FIXED);
 if (!CHOLESKY_L) console.error('Failed to compute Cholesky decomposition of asset correlation matrix!');
 
 // Normal return generator: takes geometric (compound) mean and arithmetic stdDev
-// Converts geometric to arithmetic mean, then generates normally distributed return
+// Uses geometric mean directly; σ²/2 adjustment applied at portfolio level
 // If z is provided, uses it directly; otherwise generates via Box-Muller
 const generateReturn = (geometricMean, arithmeticStdDev, z) => {
   // Generate standard normal random number (Box-Muller) if not provided
@@ -716,11 +716,9 @@ const generateReturn = (geometricMean, arithmeticStdDev, z) => {
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
-  // Convert geometric mean to arithmetic mean: arithmetic = geometric + σ²/2
-  const arithmeticMean = geometricMean + (arithmeticStdDev * arithmeticStdDev) / 2;
-
-  // Generate normally distributed return
-  const rawReturn = arithmeticMean + arithmeticStdDev * z;
+  // Generate normally distributed return using geometric mean directly
+  // The σ²/2 adjustment is applied at portfolio level, not per-asset
+  const rawReturn = geometricMean + arithmeticStdDev * z;
 
   // Clamp at -99% to prevent impossible returns (can't lose more than you have)
   return Math.max(-0.99, rawReturn);
@@ -1042,6 +1040,17 @@ const runSimulation = (params, numSims) => {
           yearReturn += assetWeights[i] * generateReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
         }
       }
+
+      // Apply portfolio-level σ²/2 adjustment to convert geometric to arithmetic mean
+      // This must be done at portfolio level (not per-asset) to correctly account for diversification
+      let portfolioVariance = 0;
+      for (let i = 0; i < NUM_ASSETS; i++) {
+        for (let j = 0; j < NUM_ASSETS; j++) {
+          portfolioVariance += assetWeights[i] * assetWeights[j] * ASSET_STDDEVS[i] * ASSET_STDDEVS[j] * ASSET_CORR_FIXED[i][j];
+        }
+      }
+      yearReturn += portfolioVariance / 2;
+
       const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
       
       // Apply first half of return to all accounts
