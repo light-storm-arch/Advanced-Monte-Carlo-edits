@@ -1041,8 +1041,8 @@ const runSimulation = (params, numSims) => {
         }
       }
 
-      // DIAGNOSTIC TEST: Hardcoded adjustment to verify mechanism works
-      yearReturn += 0.018; // Should add ~1.8% to median CAGR
+      // DIAGNOSTIC TEST: Large adjustment to verify mechanism works
+      yearReturn += 0.10; // Should add ~10% to returns - average should be ~17%
 
       const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
       
