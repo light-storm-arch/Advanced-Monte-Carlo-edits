@@ -596,8 +596,8 @@ const ASSET_CLASSES = [
   'Small Cap Stocks', "Int'l Developed Stocks", "Int'l Emerging Stocks",
   'REITs', 'Commodities'
 ];
-const ASSET_RETURNS = [0.0330, 0.0400, 0.0450, 0.0500, 0.0700, 0.0700, 0.0710, 0.0730, 0.0750, 0.0830, 0.0620, 0.0400]; // geometric (compound) returns - converted to arithmetic in generateReturn
-const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22]; // arithmetic standard deviations
+const ASSET_RETURNS = [0.0330, 0.0400, 0.0450, 0.0500, 0.0700, 0.0700, 0.0710, 0.0730, 0.0750, 0.0830, 0.0620, 0.0400]; // geometric (compound) returns - median compound return will equal these values
+const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22]; // arithmetic standard deviations (converted to log std dev in generateReturn)
 const ASSET_CORR_MATRIX = [
   [1.00, 0.40, 0.10, 0.00,-0.05,-0.05,-0.10,-0.10, 0.00, 0.00,-0.10, 0.10],
   [0.40, 1.00, 0.40, 0.50, 0.00, 0.00, 0.00,-0.10, 0.20, 0.10, 0.10, 0.20],
@@ -706,8 +706,8 @@ const ASSET_CORR_FIXED = ensurePositiveDefinite(ASSET_CORR_MATRIX);
 const CHOLESKY_L = choleskyDecomposition(ASSET_CORR_FIXED);
 if (!CHOLESKY_L) console.error('Failed to compute Cholesky decomposition of asset correlation matrix!');
 
-// Normal return generator: takes geometric (compound) mean and arithmetic stdDev
-// Uses geometric mean directly - each asset compounds at its stated geometric return
+// Log-normal return generator: ensures median compound return equals geometric mean
+// Takes geometric (compound) mean and arithmetic stdDev as inputs
 // If z is provided, uses it directly; otherwise generates via Box-Muller
 const generateReturn = (geometricMean, arithmeticStdDev, z) => {
   // Generate standard normal random number (Box-Muller) if not provided
@@ -716,11 +716,20 @@ const generateReturn = (geometricMean, arithmeticStdDev, z) => {
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
-  // Generate normally distributed return centered at geometric mean
-  const rawReturn = geometricMean + arithmeticStdDev * z;
+  // Convert geometric mean to log return mean: μ_log = ln(1 + g)
+  // This ensures the median of (1 + R) equals (1 + g)
+  const logMean = Math.log(1 + geometricMean);
 
-  // Clamp at -99% to prevent impossible returns (can't lose more than you have)
-  return Math.max(-0.99, rawReturn);
+  // Convert arithmetic std dev to log std dev
+  // For log-normal: σ_arith ≈ σ_log × (1 + g), so σ_log ≈ σ_arith / (1 + g)
+  const logStdDev = arithmeticStdDev / (1 + geometricMean);
+
+  // Generate log return from normal distribution
+  const logReturn = logMean + logStdDev * z;
+
+  // Convert to simple return: R = exp(log_return) - 1
+  // Note: exp() ensures return > -100% (can't lose more than everything)
+  return Math.exp(logReturn) - 1;
 };
 
 // =============================================================================
