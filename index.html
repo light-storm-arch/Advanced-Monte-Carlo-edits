@@ -707,7 +707,7 @@ const CHOLESKY_L = choleskyDecomposition(ASSET_CORR_FIXED);
 if (!CHOLESKY_L) console.error('Failed to compute Cholesky decomposition of asset correlation matrix!');
 
 // Normal return generator: takes geometric (compound) mean and arithmetic stdDev
-// Converts geometric mean to arithmetic mean using σ²/2 adjustment before sampling
+// Uses geometric mean directly - each asset compounds at its stated geometric return
 // If z is provided, uses it directly; otherwise generates via Box-Muller
 const generateReturn = (geometricMean, arithmeticStdDev, z) => {
   // Generate standard normal random number (Box-Muller) if not provided
@@ -716,10 +716,8 @@ const generateReturn = (geometricMean, arithmeticStdDev, z) => {
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
-  // Convert geometric mean to arithmetic mean: μ_arith = μ_geo + σ²/2
-  // This ensures that when returns are compounded, the expected geometric mean equals the input
-  const arithmeticMean = geometricMean + (arithmeticStdDev * arithmeticStdDev) / 2;
-  const rawReturn = arithmeticMean + arithmeticStdDev * z;
+  // Generate normally distributed return centered at geometric mean
+  const rawReturn = geometricMean + arithmeticStdDev * z;
 
   // Clamp at -99% to prevent impossible returns (can't lose more than you have)
   return Math.max(-0.99, rawReturn);
@@ -1034,17 +1032,31 @@ const runSimulation = (params, numSims) => {
         for (let j = 0; j <= i; j++) s += choleskyL[i][j] * zIndep[j];
         zCorr[i] = s;
       }
-      // Step 3: Generate individual asset returns and blend by portfolio weights
-      let yearReturn = 0;
+      // Step 3: Per-asset rebalancing model
+      // Each asset grows independently, then portfolio is rebalanced to target weights
+      // This ensures each asset compounds at its geometric mean while capturing rebalancing effects
+
+      // Start with notional $1 portfolio allocated by target weights
+      const assetValues = new Array(NUM_ASSETS);
       for (let i = 0; i < NUM_ASSETS; i++) {
-        if (assetWeights[i] > 0) {
-          yearReturn += assetWeights[i] * generateReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
+        assetValues[i] = assetWeights[i]; // Weight represents fraction of $1
+      }
+
+      // Apply individual asset returns (each asset grows/shrinks independently)
+      for (let i = 0; i < NUM_ASSETS; i++) {
+        if (assetValues[i] > 0) {
+          const assetReturn = generateReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
+          assetValues[i] *= (1 + assetReturn);
         }
       }
 
-      // Note: σ²/2 adjustment is now applied per-asset in generateReturn()
-      // This correctly compensates for each asset's individual variance drag
-      // Portfolio-level adjustment would double-count and be incorrect
+      // Calculate portfolio return from total value change
+      // Started at $1, so yearReturn = totalValue - 1
+      const totalValue = assetValues.reduce((sum, v) => sum + v, 0);
+      const yearReturn = totalValue - 1;
+
+      // Rebalancing happens implicitly: next iteration starts fresh with target weights
+      // This models annual rebalancing back to target allocation
 
       const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
       
