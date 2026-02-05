@@ -1239,21 +1239,75 @@ const runSimulation = (params, numSims) => {
     }
     
     const endingValue = totalBalance();
-    results.push({ success, endingValue, path, detailedPath });
+
+    // Calculate return-based CAGR from yearReturn values (pure market returns)
+    let compoundReturn = 1;
+    for (const yearData of detailedPath) {
+      compoundReturn *= (1 + yearData.yearReturn);
+    }
+    const returnCAGR = Math.pow(compoundReturn, 1 / detailedPath.length) - 1;
+
+    results.push({ success, endingValue, path, detailedPath, returnCAGR });
     allPaths.push(path);
   }
-  
+
   const successRate = results.filter(r => r.success).length / numSims;
   const endingValues = results.map(r => r.endingValue).sort((a, b) => a - b);
   const getPercentile = (arr, p) => arr[Math.min(Math.floor(arr.length * p), arr.length - 1)];
   const sortedResults = [...results].sort((a, b) => a.endingValue - b.endingValue);
   const percentilePaths = {}, percentileDetails = {};
-  [0.1, 0.25, 0.5, 0.75, 0.9].forEach(p => { 
+  [0.1, 0.25, 0.5, 0.75, 0.9].forEach(p => {
     const idx = Math.min(Math.floor(sortedResults.length * p), sortedResults.length - 1);
-    percentilePaths[`p${Math.round(p * 100)}`] = sortedResults[idx].path; 
+    percentilePaths[`p${Math.round(p * 100)}`] = sortedResults[idx].path;
     percentileDetails[`p${Math.round(p * 100)}`] = sortedResults[idx].detailedPath;
   });
-  return { successRate, percentileEnding: { p10: getPercentile(endingValues, 0.1), p25: getPercentile(endingValues, 0.25), p50: getPercentile(endingValues, 0.5), p75: getPercentile(endingValues, 0.75), p90: getPercentile(endingValues, 0.9) }, percentilePaths, percentileDetails };
+
+  // Calculate return distribution percentiles (sorted by CAGR, not ending value)
+  const sortedByReturn = [...results].sort((a, b) => a.returnCAGR - b.returnCAGR);
+  const returnPercentiles = {};
+  const returnPercentileDetails = {};
+
+  [0.01, 0.10, 0.25, 0.50, 0.75, 0.90, 0.99].forEach(p => {
+    const idx = Math.min(Math.floor(sortedByReturn.length * p), sortedByReturn.length - 1);
+    const sim = sortedByReturn[idx];
+    const key = `p${Math.round(p * 100)}`;
+
+    // Calculate statistics for this simulation
+    const returns = sim.detailedPath.map(d => d.yearReturn);
+    const arithmeticMean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+    const variance = returns.reduce((sum, r) => sum + Math.pow(r - arithmeticMean, 2), 0) / returns.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Build year-by-year data with running CAGR
+    let cumulative = 1;
+    const yearByYear = sim.detailedPath.map((d, i) => {
+      cumulative *= (1 + d.yearReturn);
+      const cagrToDate = Math.pow(cumulative, 1 / (i + 1)) - 1;
+      return {
+        year: d.year,
+        calYear: d.calYear,
+        annualReturn: d.yearReturn,
+        cagrToDate
+      };
+    });
+
+    returnPercentiles[key] = sim.returnCAGR;
+    returnPercentileDetails[key] = {
+      cagr: sim.returnCAGR,
+      arithmeticMean,
+      stdDev,
+      yearByYear
+    };
+  });
+
+  return {
+    successRate,
+    percentileEnding: { p10: getPercentile(endingValues, 0.1), p25: getPercentile(endingValues, 0.25), p50: getPercentile(endingValues, 0.5), p75: getPercentile(endingValues, 0.75), p90: getPercentile(endingValues, 0.9) },
+    percentilePaths,
+    percentileDetails,
+    returnPercentiles,
+    returnPercentileDetails
+  };
 };
 
 const findPortfolioForSuccessRate = (params, targetRate, numSims) => {
@@ -1588,6 +1642,8 @@ function App() {
   const [taxVerificationYear, setTaxVerificationYear] = useState(0);
   const [accountBalancesOpen, setAccountBalancesOpen] = useState(false);
   const [accountBalancesPercentile, setAccountBalancesPercentile] = useState('p50');
+  const [returnDistributionOpen, setReturnDistributionOpen] = useState(false);
+  const [returnDistributionPercentile, setReturnDistributionPercentile] = useState('p50');
 
   const calculate = useCallback(() => {
     setIsCalculating(true);
@@ -1639,7 +1695,7 @@ function App() {
       // Compute survivor spending ratio for guardrail display (only if different from base)
       const hasDifferentSurvivorSpending = filingStatus === 'mfj' && survivorSpending !== null && survivorSpending !== baseSpending;
       const survivorRatio = hasDifferentSurvivorSpending && baseSpending > 0 ? survivorSpending / baseSpending : null;
-      setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, survivorRatio, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails });
+      setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, survivorRatio, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails, returnPercentiles: mainResult.returnPercentiles, returnPercentileDetails: mainResult.returnPercentileDetails });
       setIsCalculating(false);
     }, 100);
   }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
@@ -2898,6 +2954,7 @@ function App() {
                 <div className="mt-5">
                   <p className="text-sm text-slate-400 mb-4">
                     Track how each account type (Pre-Tax, Roth, Taxable) changes over time. Select a percentile to see the account breakdown for that simulation outcome.
+                    <br/><em>Note: These percentiles are based on ending portfolio value (affected by withdrawals and sequence of returns).</em>
                   </p>
                   
                   <div className="flex items-center gap-4 mb-4">
@@ -3032,9 +3089,112 @@ function App() {
                         
                         <div className="bg-slate-800/50 rounded-lg p-3 mt-4">
                           <p className="text-xs text-slate-500">
-                            <strong>Withdrawal Order:</strong> The bracket-filling strategy prioritizes: 1) RMDs (required), 2) Fill 12% bracket with Pre-Tax, 
+                            <strong>Withdrawal Order:</strong> The bracket-filling strategy prioritizes: 1) RMDs (required), 2) Fill 12% bracket with Pre-Tax,
                             3) Taxable (capital gains may be 0%), 4) Additional Pre-Tax if needed, 5) Roth last (preserves tax-free growth).
                             This explains why Pre-Tax typically depletes faster than Roth.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Return Distribution Section */}
+            <div className="card card-accent p-6">
+              <button
+                onClick={() => setReturnDistributionOpen(!returnDistributionOpen)}
+                className="w-full flex justify-between items-center text-left"
+              >
+                <h3 className="font-display text-xl font-semibold text-amber-200">📈 Return Distribution (Pure Market Returns)</h3>
+                <span className="text-amber-200 text-2xl">{returnDistributionOpen ? '−' : '+'}</span>
+              </button>
+
+              {returnDistributionOpen && results.returnPercentileDetails && (
+                <div className="mt-5">
+                  <p className="text-sm text-slate-400 mb-4">
+                    These percentiles are based on compound annual growth rate (CAGR) of pure market returns, independent of withdrawals or sequence of returns.
+                    Use this to validate that simulated returns match expected distributions.
+                  </p>
+
+                  {/* Summary of all percentiles */}
+                  <div className="grid grid-cols-7 gap-2 mb-6">
+                    {[{key:'p1',label:'1st'},{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'},{key:'p99',label:'99th'}].map(p => (
+                      <div key={p.key} className={`bg-slate-800/70 rounded-lg p-3 text-center cursor-pointer transition-all ${returnDistributionPercentile === p.key ? 'ring-2 ring-amber-500' : 'hover:bg-slate-700/70'}`} onClick={() => setReturnDistributionPercentile(p.key)}>
+                        <div className="text-xs text-slate-400 mb-1">{p.label}</div>
+                        <div className={`text-lg font-semibold ${results.returnPercentiles[p.key] >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {(results.returnPercentiles[p.key] * 100).toFixed(2)}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Detailed view for selected percentile */}
+                  {(() => {
+                    const detail = results.returnPercentileDetails[returnDistributionPercentile];
+                    if (!detail) return null;
+
+                    const percentileLabel = returnDistributionPercentile === 'p1' ? '1st' : returnDistributionPercentile === 'p10' ? '10th' : returnDistributionPercentile === 'p25' ? '25th' : returnDistributionPercentile === 'p50' ? '50th' : returnDistributionPercentile === 'p75' ? '75th' : returnDistributionPercentile === 'p90' ? '90th' : '99th';
+
+                    return (
+                      <div>
+                        <h4 className="text-lg font-semibold text-amber-200 mb-3">{percentileLabel} Percentile Simulation Details</h4>
+
+                        {/* Statistics */}
+                        <div className="grid grid-cols-3 gap-4 mb-4">
+                          <div className="bg-slate-800/70 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 mb-1">CAGR</div>
+                            <div className={`text-xl font-semibold ${detail.cagr >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {(detail.cagr * 100).toFixed(2)}%
+                            </div>
+                          </div>
+                          <div className="bg-slate-800/70 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 mb-1">Arithmetic Mean</div>
+                            <div className={`text-xl font-semibold ${detail.arithmeticMean >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {(detail.arithmeticMean * 100).toFixed(2)}%
+                            </div>
+                          </div>
+                          <div className="bg-slate-800/70 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 mb-1">Std Deviation</div>
+                            <div className="text-xl font-semibold text-blue-400">
+                              {(detail.stdDev * 100).toFixed(2)}%
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Year-by-year table */}
+                        <div className="overflow-x-auto" style={{maxHeight:'400px',overflowY:'auto'}}>
+                          <table className="data-table text-xs">
+                            <thead style={{position:'sticky',top:0}}>
+                              <tr>
+                                <th>Year</th>
+                                <th>Calendar Year</th>
+                                <th>Annual Return</th>
+                                <th>CAGR to Date</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.yearByYear.map((d, idx) => (
+                                <tr key={idx}>
+                                  <td>{d.year + 1}</td>
+                                  <td>{d.calYear}</td>
+                                  <td className={d.annualReturn >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                    {(d.annualReturn * 100).toFixed(2)}%
+                                  </td>
+                                  <td className={d.cagrToDate >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                    {(d.cagrToDate * 100).toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="bg-slate-800/50 rounded-lg p-3 mt-4">
+                          <p className="text-xs text-slate-500">
+                            <strong>Note:</strong> These are pure market returns from the simulation, calculated as CAGR = [(1+r₁)(1+r₂)...(1+rₙ)]^(1/n) - 1.
+                            The percentiles are sorted by CAGR, not by ending portfolio value. This allows you to verify that return distributions match your expected geometric means and volatilities.
                           </p>
                         </div>
                       </div>
