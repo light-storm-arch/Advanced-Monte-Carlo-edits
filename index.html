@@ -1064,24 +1064,17 @@ const runSimulation = (params, numSims) => {
       // Rebalancing happens implicitly: next iteration starts fresh with target weights
       // This models annual rebalancing back to target allocation
 
-      const halfReturn = Math.pow(1 + yearReturn, 0.5) - 1;
-      
-      // Apply first half of return to all accounts
-      c1PreTax *= (1 + halfReturn);
-      c2PreTax *= (1 + halfReturn);
-      c1Roth *= (1 + halfReturn);
-      c2Roth *= (1 + halfReturn);
-      taxable *= (1 + halfReturn);
-      basis *= (1 + halfReturn);
-      
-      const afterFirstHalf = totalBalance();
-      
+      // =========================================================================
+      // BEGINNING OF YEAR: Process all withdrawals and income BEFORE applying returns
+      // This is more conservative and simpler than mid-year timing
+      // =========================================================================
+
       // Calculate gross withdrawal needed for target after-tax spending
       // All taxes (on income, withdrawals, dividends, interest) are calculated together
       let grossWithdrawal = 0, fromTaxable = 0, fromPreTax = 0, fromRoth = 0, totalTax = 0, federalTax = 0, stateTax = 0;
       let client1RMD = 0, client2RMD = 0, totalRMD = 0, excessRMDAfterTax = 0;
       let netIncome = 0, excessIncome = 0;
-      
+
       // Spending need (gross) - income will offset this in the withdrawal calculation
       const spendingNeed = yearSpending + yearGoals;
       
@@ -1212,30 +1205,32 @@ const runSimulation = (params, numSims) => {
       
       // Check if we ran out of money
       if (afterWithdrawal < 0 || (spendingNeed > 0 && afterWithdrawal < spendingNeed * 0.1)) {
-        detailedPath.push({ year, calYear, age: c1Age, age2: c2Age, startBalance, yearReturn, halfReturn, afterFirstHalf, yearSpending, yearGoals, yearIncome, grossWithdrawal, fromTaxable, fromPreTax, fromRoth, totalTax, federalTax, stateTax, client1RMD, client2RMD, totalRMD, taxDetails, afterWithdrawal: 0, endBalance: 0, endPreTax: 0, endRoth: 0, endTaxable: 0 });
-        success = false; 
+        detailedPath.push({ year, calYear, age: c1Age, age2: c2Age, startBalance, yearReturn, yearSpending, yearGoals, yearIncome, grossWithdrawal, fromTaxable, fromPreTax, fromRoth, totalTax, federalTax, stateTax, client1RMD, client2RMD, totalRMD, taxDetails, afterWithdrawal: 0, endBalance: 0, endPreTax: 0, endRoth: 0, endTaxable: 0 });
+        success = false;
         path.push(0);
         for (let r = year + 1; r < planLength; r++) {
           path.push(0);
           const rAge = (client1Age || clientAge) + r;
           const rAge2 = filingStatus === 'mfj' ? (client2Age || clientAge) + r : 0;
           const emptyTaxDetails = { qualifiedDividends: 0, interestIncome: 0, taxableOrdinaryIncome: 0, totalCapitalGains: 0, federalOrdinaryTax: 0, federalCapGainsTax: 0, standardDeduction: 0, taxableWithdrawalGains: 0 };
-          detailedPath.push({ year: r, calYear: currentYear + r, age: rAge, age2: rAge2, startBalance: 0, yearReturn: 0, halfReturn: 0, afterFirstHalf: 0, yearSpending: 0, yearGoals: 0, yearIncome: 0, grossWithdrawal: 0, fromTaxable: 0, fromPreTax: 0, fromRoth: 0, totalTax: 0, federalTax: 0, stateTax: 0, client1RMD: 0, client2RMD: 0, totalRMD: 0, taxDetails: emptyTaxDetails, afterWithdrawal: 0, endBalance: 0, endPreTax: 0, endRoth: 0, endTaxable: 0 });
+          detailedPath.push({ year: r, calYear: currentYear + r, age: rAge, age2: rAge2, startBalance: 0, yearReturn: 0, yearSpending: 0, yearGoals: 0, yearIncome: 0, grossWithdrawal: 0, fromTaxable: 0, fromPreTax: 0, fromRoth: 0, totalTax: 0, federalTax: 0, stateTax: 0, client1RMD: 0, client2RMD: 0, totalRMD: 0, taxDetails: emptyTaxDetails, afterWithdrawal: 0, endBalance: 0, endPreTax: 0, endRoth: 0, endTaxable: 0 });
         }
         break;
       }
       
-      // Apply second half of return
-      c1PreTax *= (1 + halfReturn);
-      c2PreTax *= (1 + halfReturn);
-      c1Roth *= (1 + halfReturn);
-      c2Roth *= (1 + halfReturn);
-      taxable *= (1 + halfReturn);
-      basis *= (1 + halfReturn);
-      
+      // =========================================================================
+      // END OF YEAR: Apply full year's return AFTER all withdrawals/income processed
+      // =========================================================================
+      c1PreTax *= (1 + yearReturn);
+      c2PreTax *= (1 + yearReturn);
+      c1Roth *= (1 + yearReturn);
+      c2Roth *= (1 + yearReturn);
+      taxable *= (1 + yearReturn);
+      basis *= (1 + yearReturn);
+
       const endBalance = totalBalance();
       path.push(endBalance);
-      detailedPath.push({ year, calYear, age: c1Age, age2: c2Age, startBalance, yearReturn, halfReturn, afterFirstHalf, yearSpending, yearGoals, yearIncome, grossWithdrawal, fromTaxable, fromPreTax, fromRoth, totalTax, federalTax, stateTax, client1RMD, client2RMD, totalRMD, taxDetails, afterWithdrawal, endBalance, endPreTax: preTaxTotal(), endRoth: rothTotal(), endTaxable: taxable });
+      detailedPath.push({ year, calYear, age: c1Age, age2: c2Age, startBalance, yearReturn, yearSpending, yearGoals, yearIncome, grossWithdrawal, fromTaxable, fromPreTax, fromRoth, totalTax, federalTax, stateTax, client1RMD, client2RMD, totalRMD, taxDetails, afterWithdrawal, endBalance, endPreTax: preTaxTotal(), endRoth: rothTotal(), endTaxable: taxable });
     }
     
     const endingValue = totalBalance();
@@ -1715,20 +1710,18 @@ function App() {
     html += '<p class="meta">Generated: ' + new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</p>';
     html += '<p class="meta">Final Portfolio Value: ' + formatCurrency(results.percentileEnding[percentile]) + '</p>';
     
-    html += '<table><tr><th>Year</th><th>Age</th><th>Start</th><th>Return</th><th>1st Half</th><th>Spending</th><th>Goals</th><th>Income</th><th>AT Inc</th><th>AT Need</th><th>RMD</th><th>Gross W/D</th><th>Taxable</th><th>PreTax</th><th>Roth</th><th>Fed Tax</th><th>State Tax</th><th>Total Tax</th><th>2nd Half</th><th>End</th></tr>';
-    
+    html += '<table><tr><th>Year</th><th>Age</th><th>Start</th><th>Return</th><th>Spending</th><th>Goals</th><th>Income</th><th>AT Inc</th><th>AT Need</th><th>RMD</th><th>Gross W/D</th><th>Taxable</th><th>PreTax</th><th>Roth</th><th>Fed Tax</th><th>State Tax</th><th>Total Tax</th><th>Return $</th><th>End</th></tr>';
+
     data.forEach(r => {
       const afterTaxIncome = r.taxDetails?.netIncome || 0;
       const afterTaxNeed = r.yearSpending + r.yearGoals - afterTaxIncome;
       const ageDisplay = filingStatus === 'mfj' ? (r.age > 0 ? r.age : '-') + '/' + (r.age2 > 0 ? r.age2 : '-') : r.age;
-      const firstHalfReturn = (r.afterFirstHalf || 0) - (r.startBalance || 0);
-      const secondHalfReturn = (r.endBalance || 0) - (r.afterWithdrawal || 0);
+      const returnDollars = (r.endBalance || 0) - (r.afterWithdrawal || 0);
       html += '<tr>';
       html += '<td>' + r.calYear + '</td>';
       html += '<td>' + ageDisplay + '</td>';
       html += '<td>' + formatCurrency(r.startBalance) + '</td>';
       html += '<td class="' + (r.yearReturn >= 0 ? 'positive' : 'negative') + '">' + (r.yearReturn * 100).toFixed(1) + '%</td>';
-      html += '<td class="' + (firstHalfReturn >= 0 ? 'positive' : 'negative') + '">' + formatCurrency(firstHalfReturn) + '</td>';
       html += '<td>' + formatCurrency(r.yearSpending) + '</td>';
       html += '<td>' + formatCurrency(r.yearGoals) + '</td>';
       html += '<td>' + formatCurrency(r.yearIncome) + '</td>';
@@ -1742,7 +1735,7 @@ function App() {
       html += '<td class="negative">' + formatCurrency(r.federalTax) + '</td>';
       html += '<td class="negative">' + formatCurrency(r.stateTax) + '</td>';
       html += '<td class="negative">' + formatCurrency(r.totalTax) + '</td>';
-      html += '<td class="' + (secondHalfReturn >= 0 ? 'positive' : 'negative') + '">' + formatCurrency(secondHalfReturn) + '</td>';
+      html += '<td class="' + (returnDollars >= 0 ? 'positive' : 'negative') + '">' + formatCurrency(returnDollars) + '</td>';
       html += '<td><strong>' + formatCurrency(r.endBalance) + '</strong></td>';
       html += '</tr>';
     });
@@ -2529,13 +2522,12 @@ function App() {
                     <h4 className="text-sm font-semibold text-amber-200 mb-2">Calculation Steps (each year):</h4>
                     <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
                       <li><strong>Start Balance</strong> = Previous year's End Balance (or initial portfolio)</li>
-                      <li><strong>Apply 1st Half Return</strong> = All accounts grow by √(1 + Annual Return) - 1</li>
                       <li><strong>Calculate RMDs</strong> = Required distributions for each client age 73+</li>
                       <li><strong>After-Tax Income</strong> = Gross Income - Taxes on Income</li>
                       <li><strong>After-Tax Need</strong> = Spending + Goals - After-Tax Income (negative means excess to save)</li>
                       <li><strong>Bracket-Filling Withdrawal</strong>: RMDs first → Fill 12% bracket with Pre-Tax → Taxable → More Pre-Tax → Roth last</li>
                       <li><strong>Excess RMD/Income</strong> = If RMD or income exceeds need, after-tax excess reinvested to taxable</li>
-                      <li><strong>Apply 2nd Half Return</strong> = All accounts grow by remaining return</li>
+                      <li><strong>Apply Full Year Return</strong> = All accounts grow by annual return after withdrawals</li>
                     </ol>
                   </div>
                   
@@ -2547,7 +2539,6 @@ function App() {
                           <th>Age</th>
                           <th>Start</th>
                           <th>Return %</th>
-                          <th>1st Half Return</th>
                           <th>Spending</th>
                           <th>Goals</th>
                           <th>Income</th>
@@ -2561,21 +2552,19 @@ function App() {
                           <th>Fed Tax</th>
                           <th>State Tax</th>
                           <th>Total Tax</th>
-                          <th>2nd Half Return</th>
+                          <th>Return $</th>
                           <th>End</th>
                         </tr>
                       </thead>
                       <tbody>
                         {results.percentileDetails[verificationPercentile]?.map((r, idx) => {
-                          const firstHalfReturn = (r.afterFirstHalf || 0) - (r.startBalance || 0);
-                          const secondHalfReturn = (r.endBalance || 0) - (r.afterWithdrawal || 0);
+                          const returnDollars = (r.endBalance || 0) - (r.afterWithdrawal || 0);
                           return (
                           <tr key={idx}>
                             <td>{r.calYear}</td>
                             <td>{formatAge(r.age, r.age2, filingStatus === 'mfj')}</td>
                             <td>{formatCurrency(r.startBalance)}</td>
                             <td style={{color: r.yearReturn >= 0 ? '#4ade80' : '#f87171'}}>{(r.yearReturn * 100).toFixed(2)}%</td>
-                            <td style={{color: firstHalfReturn >= 0 ? '#4ade80' : '#f87171'}}>{formatCurrency(firstHalfReturn)}</td>
                             <td>{formatCurrency(r.yearSpending)}</td>
                             <td>{formatCurrency(r.yearGoals)}</td>
                             <td style={{color:'#4ade80'}}>{formatCurrency(r.yearIncome)}</td>
@@ -2589,7 +2578,7 @@ function App() {
                             <td style={{color:'#f87171'}}>{formatCurrency(r.federalTax)}</td>
                             <td style={{color:'#f87171'}}>{formatCurrency(r.stateTax)}</td>
                             <td style={{color:'#f87171'}}>{formatCurrency(r.totalTax)}</td>
-                            <td style={{color: secondHalfReturn >= 0 ? '#4ade80' : '#f87171'}}>{formatCurrency(secondHalfReturn)}</td>
+                            <td style={{color: returnDollars >= 0 ? '#4ade80' : '#f87171'}}>{formatCurrency(returnDollars)}</td>
                             <td style={{fontWeight:'bold'}}>{formatCurrency(r.endBalance)}</td>
                           </tr>
                           );
