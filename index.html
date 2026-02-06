@@ -117,8 +117,9 @@ const UNIFORM_LIFETIME_TABLE = {
 // UTILITIES: RMD & Tax Bracket Functions
 // =============================================================================
 // Calculate RMD for a given age and account balance
-const calculateRMD = (age, preTaxBalance) => {
-  if (age < 73 || preTaxBalance <= 0) return 0;
+// rmdStartAge: 73 for birth years 1951-1959, 75 for birth year 1960+
+const calculateRMD = (age, preTaxBalance, rmdStartAge = 73) => {
+  if (age < rmdStartAge || preTaxBalance <= 0) return 0;
   const divisor = UNIFORM_LIFETIME_TABLE[Math.min(age, 120)] || 2.0;
   return preTaxBalance / divisor;
 };
@@ -204,24 +205,25 @@ const calculateCapitalGainsTax = (capitalGains, ordinaryTaxableIncome, capGainsB
 // This solves: grossWithdrawal + taxFreeIncome - totalTax = spendingNeed
 // Where totalTax is calculated on: withdrawals + taxableIncome + socialSecurity + dividends + interest
 const calculateUnifiedWithdrawal = (spendingNeed, totalIncome, taxParams) => {
-  const { 
+  const {
     client1PreTax, client2PreTax, totalPreTax,
     client1Roth, client2Roth, totalRoth,
     totalTaxable, taxableBasis, stockAllocation,
     filingStatus, stateTaxRate, baseInflation, yearsFromStart,
-    client1Age, client2Age, otherIncome, socialSecurityIncome, taxFreeIncome,
+    client1Age, client2Age, client1RmdAge, client2RmdAge,
+    otherIncome, socialSecurityIncome, taxFreeIncome,
     cachedBrackets, cachedCapGainsBrackets, cachedDeduction, cachedTopOf12
   } = taxParams;
-  
+
   const brackets = cachedBrackets || getInflatedBrackets(filingStatus, baseInflation, yearsFromStart);
   const capGainsBrackets = cachedCapGainsBrackets || getInflatedCapGainsBrackets(filingStatus, baseInflation, yearsFromStart);
   const standardDeduction = cachedDeduction || getInflatedStandardDeduction(filingStatus, baseInflation, yearsFromStart);
   const topOf12Bracket = cachedTopOf12 || getTopOf12PercentBracket(filingStatus, baseInflation, yearsFromStart);
-  
+
   // Calculate RMDs (mandatory regardless of spending need)
   // Always calculate both - deceased spouse will have age=0 and balance=0, so RMD=0
-  const client1RMD = calculateRMD(client1Age, client1PreTax);
-  const client2RMD = calculateRMD(client2Age, client2PreTax);
+  const client1RMD = calculateRMD(client1Age, client1PreTax, client1RmdAge || 73);
+  const client2RMD = calculateRMD(client2Age, client2PreTax, client2RmdAge || 73);
   const totalRMD = client1RMD + client2RMD;
   
   // Calculate taxable account income (dividends and interest) - always generated
@@ -330,26 +332,27 @@ const calculateUnifiedWithdrawal = (spendingNeed, totalIncome, taxParams) => {
 
 // Main withdrawal calculation with RMDs and bracket-filling optimization
 const calculateOptimizedWithdrawal = (targetAfterTax, accountBalances, taxParams) => {
-  const { 
+  const {
     client1PreTax, client2PreTax, totalPreTax,
     client1Roth, client2Roth, totalRoth,
     totalTaxable, taxableBasis, stockAllocation,
     filingStatus, stateTaxRate, baseInflation, yearsFromStart,
-    client1Age, client2Age, otherIncome, socialSecurityIncome,
+    client1Age, client2Age, client1RmdAge, client2RmdAge,
+    otherIncome, socialSecurityIncome,
     // Cached values (optional - for performance)
     cachedBrackets, cachedCapGainsBrackets, cachedDeduction, cachedTopOf12
   } = taxParams;
-  
+
   // Use cached values if provided, otherwise calculate
   const brackets = cachedBrackets || getInflatedBrackets(filingStatus, baseInflation, yearsFromStart);
   const capGainsBrackets = cachedCapGainsBrackets || getInflatedCapGainsBrackets(filingStatus, baseInflation, yearsFromStart);
   const standardDeduction = cachedDeduction || getInflatedStandardDeduction(filingStatus, baseInflation, yearsFromStart);
   const topOf12Bracket = cachedTopOf12 || getTopOf12PercentBracket(filingStatus, baseInflation, yearsFromStart);
-  
+
   // Step 1: Calculate RMDs (mandatory pre-tax withdrawals)
   // Always calculate both - deceased spouse will have age=0 and balance=0, so RMD=0
-  const client1RMD = calculateRMD(client1Age, client1PreTax);
-  const client2RMD = calculateRMD(client2Age, client2PreTax);
+  const client1RMD = calculateRMD(client1Age, client1PreTax, client1RmdAge || 73);
+  const client2RMD = calculateRMD(client2Age, client2PreTax, client2RmdAge || 73);
   const totalRMD = client1RMD + client2RMD;
   
   // Step 2: Calculate taxable account income (dividends and interest)
@@ -513,19 +516,30 @@ const calculateWithdrawalAllocation = (
   // Ordinary income = pre-tax withdrawals + interest income + other income + taxable SS
   const ordinaryIncome = fromPreTax + interestIncome + otherIncome + taxableSocialSecurity;
   const taxableOrdinaryIncome = Math.max(0, ordinaryIncome - standardDeduction);
-  
+
   // Capital gains = taxable withdrawal gains + qualified dividends
   const taxableWithdrawalGains = fromTaxable * taxableGainRatio;
   const totalCapitalGains = taxableWithdrawalGains + qualifiedDividends;
-  
+
   // Federal taxes
   const federalOrdinaryTax = calculateFederalTax(taxableOrdinaryIncome, brackets);
   const federalCapGainsTax = calculateCapitalGainsTax(totalCapitalGains, taxableOrdinaryIncome, capGainsBrackets);
-  const federalTax = federalOrdinaryTax + federalCapGainsTax;
-  
+
+  // NIIT (Net Investment Income Tax) - 3.8% on investment income for high earners
+  // Applies to lesser of: net investment income OR (MAGI - threshold)
+  // Thresholds: $200k single/HoH, $250k MFJ (not inflation-adjusted)
+  const niitThreshold = filingStatus === 'mfj' ? 250000 : 200000;
+  const netInvestmentIncome = interestIncome + qualifiedDividends + taxableWithdrawalGains;
+  // MAGI for NIIT is approximately AGI (gross income before deductions)
+  const magiForNiit = ordinaryIncome + totalCapitalGains;
+  const magiOverThreshold = Math.max(0, magiForNiit - niitThreshold);
+  const niitTax = 0.038 * Math.min(netInvestmentIncome, magiOverThreshold);
+
+  const federalTax = federalOrdinaryTax + federalCapGainsTax + niitTax;
+
   // State tax (flat rate on taxable income after standard deduction + capital gains)
   const stateTax = (taxableOrdinaryIncome + totalCapitalGains) * stateTaxRate;
-  
+
   const totalTax = federalTax + stateTax;
   const actualGrossWithdrawal = fromPreTax + fromTaxable + fromRoth;
   const afterTax = actualGrossWithdrawal - totalTax;
@@ -548,6 +562,7 @@ const calculateWithdrawalAllocation = (
     federalTax,
     federalOrdinaryTax,
     federalCapGainsTax,
+    niitTax,
     stateTax,
     afterTax,
     taxableOrdinaryIncome,
@@ -716,6 +731,10 @@ const generateReturn = (geometricMean, logVolatility, z) => {
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
+  // Clamp z to ±5 standard deviations to prevent extreme outliers
+  // (probability of |z| > 5 is ~0.00006%, essentially never happens naturally)
+  z = Math.max(-5, Math.min(5, z));
+
   // Convert geometric mean to log return mean: μ_log = ln(1 + g)
   // This ensures the median of (1 + R) equals (1 + g)
   const logMean = Math.log(1 + geometricMean);
@@ -780,7 +799,7 @@ const PercentageInputNullable = ({ value, onChange, placeholder }) => {
 // SIMULATION ENGINE: Monte Carlo & Guardrail Analysis
 // =============================================================================
 const runSimulation = (params, numSims) => {
-  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
+  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1RmdAge, client2RmdAge, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
   const results = [], allPaths = [];
   const totalPortfolio = preTaxBalance + rothBalance + taxableBalance;
   
@@ -1108,6 +1127,8 @@ const runSimulation = (params, numSims) => {
         yearsFromStart: year,
         client1Age: c1Age,
         client2Age: c2Age,
+        client1RmdAge: client1RmdAge || 73,
+        client2RmdAge: client2RmdAge || 73,
         otherIncome: taxableIncome,
         socialSecurityIncome: socialSecurityIncome,
         taxFreeIncome: taxFreeIncome,
@@ -1226,7 +1247,8 @@ const runSimulation = (params, numSims) => {
       c1Roth *= (1 + yearReturn);
       c2Roth *= (1 + yearReturn);
       taxable *= (1 + yearReturn);
-      basis *= (1 + yearReturn);
+      // Note: basis does NOT change with market returns - it only changes when buying/selling
+      // When basis > taxable (unrealized loss), gain ratio is 0 so no tax on withdrawals
 
       const endBalance = totalBalance();
       path.push(endBalance);
@@ -1236,11 +1258,18 @@ const runSimulation = (params, numSims) => {
     const endingValue = totalBalance();
 
     // Calculate return-based CAGR from yearReturn values (pure market returns)
+    // Only count years with actual returns (before failure), not zero-padded years after failure
     let compoundReturn = 1;
+    let actualYears = 0;
     for (const yearData of detailedPath) {
-      compoundReturn *= (1 + yearData.yearReturn);
+      // Count year if it had actual market activity (startBalance > 0 or it's the first year)
+      if (yearData.startBalance > 0 || actualYears === 0) {
+        compoundReturn *= (1 + yearData.yearReturn);
+        actualYears++;
+      }
     }
-    const returnCAGR = Math.pow(compoundReturn, 1 / detailedPath.length) - 1;
+    // Use actual years for CAGR calculation, with minimum of 1 to avoid division by zero
+    const returnCAGR = actualYears > 0 ? Math.pow(compoundReturn, 1 / actualYears) - 1 : 0;
 
     results.push({ success, endingValue, path, detailedPath, returnCAGR });
     allPaths.push(path);
@@ -1519,10 +1548,12 @@ function App() {
   const [client1Name, setClient1Name] = useState('');
   const [client1Age, setClient1Age] = useState(60);
   const [client1PlanLength, setClient1PlanLength] = useState(30);
+  const [client1RmdAge, setClient1RmdAge] = useState(73); // 73 for birth years 1951-1959, 75 for 1960+
   const [client2Name, setClient2Name] = useState('');
   const [client2Age, setClient2Age] = useState(58);
   const [client2PlanLength, setClient2PlanLength] = useState(32);
-  
+  const [client2RmdAge, setClient2RmdAge] = useState(75); // Default to 75 for younger spouse
+
   // Filing status (moved from Tax Settings)
   const [filingStatus, setFilingStatus] = useState('mfj');
   
@@ -1543,7 +1574,11 @@ function App() {
   
   // Account helper functions
   const addAccount = () => setAccounts([...accounts, { id: Date.now(), type: 'pretax', balance: 0, owner: 'client1', costBasis: 0, stockAllocation: 60 }]);
-  const updateAccount = (id, field, value) => setAccounts(accounts.map(a => a.id === id ? { ...a, [field]: value } : a));
+  const updateAccount = (id, field, value) => {
+    // Validate stockAllocation to be between 0 and 100
+    const sanitizedValue = field === 'stockAllocation' ? Math.max(0, Math.min(100, value)) : value;
+    setAccounts(accounts.map(a => a.id === id ? { ...a, [field]: sanitizedValue } : a));
+  };
   const removeAccount = (id) => setAccounts(accounts.filter(a => a.id !== id));
   
   // Computed totals from accounts
@@ -1651,6 +1686,7 @@ function App() {
         baseSpending, survivorSpending: filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null,
         baseInflation: baseInflation / 100, goals, incomeSources,
         currentYear, clientAge, client1Age, client2Age: filingStatus === 'mfj' ? client2Age : 0,
+        client1RmdAge, client2RmdAge: filingStatus === 'mfj' ? client2RmdAge : client1RmdAge,
         client1PlanLength, client2PlanLength: filingStatus === 'mfj' ? client2PlanLength : client1PlanLength,
         spendingMode,
         phase2Year, phase2Reduction: phase2Reduction / 100,
@@ -1693,7 +1729,7 @@ function App() {
       setResults({ currentSuccess: mainResult.successRate, upperGuardrailPortfolio: upperPortfolio, upperGuardrailSpending: upperSpending, lowerGuardrailPortfolio: lowerPortfolio, lowerGuardrailSpending: lowerSpending, survivorRatio, percentileEnding: mainResult.percentileEnding, chartData, percentileDetails: mainResult.percentileDetails, returnPercentiles: mainResult.returnPercentiles, returnPercentileDetails: mainResult.returnPercentileDetails });
       setIsCalculating(false);
     }, 100);
-  }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
+  }, [preTaxBalance, rothBalance, taxableBalance, taxableBasis, client1PreTax, client2PreTax, client1Roth, client2Roth, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, clientAge, client1Age, client2Age, client1RmdAge, client2RmdAge, numSimulations, targetSuccessRate, upperGuardrail, lowerGuardrail, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, client1PlanLength, client2PlanLength, accounts]);
 
   const exportPDF = () => { if (results) generatePDF({ currentYear, client1Name, client1Age, client1PlanLength, client2Name, client2Age, client2PlanLength, planLength, accounts, preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, totalPortfolio, expectedReturn: expectedReturn / 100, stdDev: stdDev / 100, assetAllocations, baseInflation: baseInflation / 100, baseSpending, survivorSpending: filingStatus === 'mfj' && survivorSpending !== null && survivorSpending !== baseSpending ? survivorSpending : null, targetSuccessRate: targetSuccessRate / 100, upperGuardrail: upperGuardrail / 100, lowerGuardrail: lowerGuardrail / 100, goals, incomeSources, numSimulations, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction }, results); };
 
@@ -2093,6 +2129,19 @@ function App() {
               <div><label className="block text-sm text-slate-400 mb-2">Client 1 Name</label><input type="text" value={client1Name} onChange={e => setClient1Name(e.target.value)} placeholder="Enter name" /></div>
               <div><label className="block text-sm text-slate-400 mb-2">Client 1 Age</label><input type="text" value={client1Age} onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setClient1Age(v === '' ? '' : parseInt(v)); }} onBlur={e => { if (e.target.value === '') setClient1Age(60); }} /></div>
               <div><label className="block text-sm text-slate-400 mb-2">Client 1 Plan Length (years)</label><input type="text" value={client1PlanLength} onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setClient1PlanLength(v === '' ? '' : parseInt(v)); }} onBlur={e => { if (e.target.value === '') setClient1PlanLength(30); }} /></div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Client 1 RMD Start Age</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="client1RmdAge" checked={client1RmdAge === 73} onChange={() => setClient1RmdAge(73)} className="accent-amber-500" />
+                    <span className="text-sm">73 (born 1951-1959)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="client1RmdAge" checked={client1RmdAge === 75} onChange={() => setClient1RmdAge(75)} className="accent-amber-500" />
+                    <span className="text-sm">75 (born 1960+)</span>
+                  </label>
+                </div>
+              </div>
               <div><label className="block text-sm text-slate-400 mb-2">Current Year</label><input type="text" value={currentYear} onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setCurrentYear(v === '' ? '' : parseInt(v)); }} onBlur={e => { if (e.target.value === '') setCurrentYear(2026); }} /></div>
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Filing Status</label>
@@ -2116,6 +2165,19 @@ function App() {
                   <div><label className="block text-sm text-slate-400 mb-2">Client 2 Name</label><input type="text" value={client2Name} onChange={e => setClient2Name(e.target.value)} placeholder="Enter name" /></div>
                   <div><label className="block text-sm text-slate-400 mb-2">Client 2 Age</label><input type="text" value={client2Age} onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setClient2Age(v === '' ? '' : parseInt(v)); }} onBlur={e => { if (e.target.value === '') setClient2Age(58); }} /></div>
                   <div><label className="block text-sm text-slate-400 mb-2">Client 2 Plan Length (years)</label><input type="text" value={client2PlanLength} onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setClient2PlanLength(v === '' ? '' : parseInt(v)); }} onBlur={e => { if (e.target.value === '') setClient2PlanLength(32); }} /></div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">Client 2 RMD Start Age</label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="client2RmdAge" checked={client2RmdAge === 73} onChange={() => setClient2RmdAge(73)} className="accent-amber-500" />
+                        <span className="text-sm">73 (born 1951-1959)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="client2RmdAge" checked={client2RmdAge === 75} onChange={() => setClient2RmdAge(75)} className="accent-amber-500" />
+                        <span className="text-sm">75 (born 1960+)</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               )}
               {filingStatus === 'mfj' && (
