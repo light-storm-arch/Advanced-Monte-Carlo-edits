@@ -1174,6 +1174,7 @@ const runSimulation = (params, numSims) => {
         totalCapitalGains: withdrawal.totalCapitalGains || 0,
         federalOrdinaryTax: withdrawal.federalOrdinaryTax || 0,
         federalCapGainsTax: withdrawal.federalCapGainsTax || 0,
+        niitTax: withdrawal.niitTax || 0,
         standardDeduction: cachedDeductions[year],
         taxableWithdrawalGains: fromTaxable > 0 && taxable > 0 ? fromTaxable * (1 - basis / taxable) : 0,
         filingStatus: currentFilingStatus,
@@ -1861,6 +1862,9 @@ function App() {
     html += '<h2>Federal Tax Calculation</h2><div class="section">';
     html += '<div class="row"><span class="label">Tax on Ordinary Income</span><span class="value negative">' + formatCurrency(td.federalOrdinaryTax || 0) + '</span></div>';
     html += '<div class="row"><span class="label">Tax on Capital Gains</span><span class="value negative">' + formatCurrency(td.federalCapGainsTax || 0) + '</span></div>';
+    if ((td.niitTax || 0) > 0) {
+      html += '<div class="row"><span class="label">Net Investment Income Tax (3.8%)</span><span class="value negative">' + formatCurrency(td.niitTax) + '</span></div>';
+    }
     html += '<div class="row total"><span class="label">Total Federal Tax</span><span class="value negative">' + formatCurrency(yearData.federalTax) + '</span></div>';
     html += '</div>';
     
@@ -2800,6 +2804,9 @@ function App() {
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between"><span className="text-slate-400">Tax on Ordinary Income:</span><span className="text-red-300">{formatCurrency(td.federalOrdinaryTax)}</span></div>
                             <div className="flex justify-between"><span className="text-slate-400">Tax on Capital Gains:</span><span className="text-red-300">{formatCurrency(td.federalCapGainsTax)}</span></div>
+                            {(td.niitTax || 0) > 0 && (
+                              <div className="flex justify-between"><span className="text-slate-400">Net Investment Income Tax (3.8%):</span><span className="text-red-300">{formatCurrency(td.niitTax)}</span></div>
+                            )}
                             <div className="flex justify-between border-t border-slate-600 pt-2 mt-2"><span className="text-slate-300 font-medium">Total Federal Tax:</span><span className="text-red-400 font-medium">{formatCurrency(yearData.federalTax)}</span></div>
                           </div>
                         </div>
