@@ -1076,6 +1076,57 @@ test('State tax is flat rate on taxable income + gains', () => {
     : { detail: `Expected $${expected.toFixed(2)}, got $${result.stateTax.toFixed(2)}` };
 });
 
+test('NIIT (3.8%) applies when MAGI exceeds $200k (single) with investment income', () => {
+  // Large pre-tax withdrawal + taxable account with gains to push MAGI over $200k
+  // and generate net investment income
+  const result = calculateWithdrawalAllocation(
+    300000, 0, 0, 0,          // $300k gross withdrawal, no RMDs
+    500000, 0, 200000, 100000, 0.5,  // $500k preTax, $0 roth, $200k taxable (50% gains)
+    2000, 4000, 0, 0, 'single',      // $2k dividends, $4k interest, no other income
+    16100, 50400, TAX_BRACKETS_2026.single, CAPITAL_GAINS_BRACKETS_2026.single, 0.05
+  );
+  // NIIT = 3.8% * min(netInvestmentIncome, MAGI - $200k)
+  // netInvestmentIncome = interest + dividends + taxableWithdrawalGains
+  // The withdrawal allocation fills 12% bracket from preTax, then uses taxable, then more preTax
+  const netInvIncome = 4000 + 2000 + result.fromTaxable * 0.5; // interest + divs + gains
+  const magi = result.fromPreTax + 4000 + 0 + result.totalCapitalGains; // ordinaryIncome + capGains
+  const magiOver = Math.max(0, magi - 200000);
+  const expectedNiit = 0.038 * Math.min(netInvIncome, magiOver);
+  return approxEqual(result.niitTax, expectedNiit, 1)
+    ? { pass: true, detail: `NIIT = $${result.niitTax.toFixed(2)} (expected $${expectedNiit.toFixed(2)}), MAGI=$${magi.toFixed(0)}` }
+    : { detail: `Expected NIIT $${expectedNiit.toFixed(2)}, got $${result.niitTax.toFixed(2)}` };
+});
+
+test('NIIT is $0 when MAGI is below threshold', () => {
+  // Small withdrawal that keeps MAGI under $200k
+  const result = calculateWithdrawalAllocation(
+    50000, 0, 0, 0,
+    500000, 0, 50000, 25000, 0.5,
+    250, 1000, 0, 0, 'single',
+    16100, 50400, TAX_BRACKETS_2026.single, CAPITAL_GAINS_BRACKETS_2026.single, 0.05
+  );
+  return result.niitTax === 0
+    ? { pass: true, detail: `NIIT = $0 (MAGI below $200k threshold)` }
+    : { detail: `Expected $0, got $${result.niitTax.toFixed(2)}` };
+});
+
+test('NIIT uses $250k threshold for MFJ', () => {
+  // Large withdrawal for MFJ - MAGI over $250k
+  const result = calculateWithdrawalAllocation(
+    350000, 0, 0, 0,
+    600000, 0, 200000, 100000, 0.5,
+    2000, 4000, 0, 0, 'mfj',
+    32200, 100800, TAX_BRACKETS_2026.mfj, CAPITAL_GAINS_BRACKETS_2026.mfj, 0.05
+  );
+  const netInvIncome = 4000 + 2000 + result.fromTaxable * 0.5;
+  const magi = result.fromPreTax + 4000 + 0 + result.totalCapitalGains;
+  const magiOver = Math.max(0, magi - 250000);
+  const expectedNiit = 0.038 * Math.min(netInvIncome, magiOver);
+  return approxEqual(result.niitTax, expectedNiit, 1)
+    ? { pass: true, detail: `NIIT = $${result.niitTax.toFixed(2)} (MFJ threshold $250k, MAGI=$${magi.toFixed(0)})` }
+    : { detail: `Expected $${expectedNiit.toFixed(2)}, got $${result.niitTax.toFixed(2)}` };
+});
+
 // ============================================================
 // 17. calculateOptimizedWithdrawal Tests
 // ============================================================
