@@ -612,7 +612,7 @@ const ASSET_CLASSES = [
   'REITs', 'Commodities'
 ];
 const ASSET_RETURNS = [0.0330, 0.0400, 0.0450, 0.0500, 0.0700, 0.0700, 0.0710, 0.0730, 0.0750, 0.0830, 0.0620, 0.0400]; // geometric (compound) returns - median compound return will equal these values
-const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22]; // log return volatilities (annualized std dev of continuously compounded returns)
+const ASSET_STDDEVS = [0.015, 0.04, 0.06, 0.10, 0.18, 0.19, 0.19, 0.21, 0.20, 0.26, 0.23, 0.22]; // simple return standard deviations (annualized std dev of simple returns)
 const ASSET_CORR_MATRIX = [
   [1.00, 0.40, 0.10, 0.00,-0.05,-0.05,-0.10,-0.10, 0.00, 0.00,-0.10, 0.10],
   [0.40, 1.00, 0.40, 0.50, 0.00, 0.00, 0.00,-0.10, 0.20, 0.10, 0.10, 0.20],
@@ -722,9 +722,10 @@ const CHOLESKY_L = choleskyDecomposition(ASSET_CORR_FIXED);
 if (!CHOLESKY_L) console.error('Failed to compute Cholesky decomposition of asset correlation matrix!');
 
 // Log-normal return generator: ensures median compound return equals geometric mean
-// Takes geometric (compound) mean and log return volatility as inputs
+// Takes geometric (compound) mean and simple return standard deviation as inputs
+// Internally converts simple std dev to log std dev for the lognormal model
 // If z is provided, uses it directly; otherwise generates via Box-Muller
-const generateReturn = (geometricMean, logVolatility, z) => {
+const generateReturn = (geometricMean, simpleStdDev, z) => {
   // Generate standard normal random number (Box-Muller) if not provided
   if (z === undefined) {
     // Guard against Math.random() returning exactly 0 (causes log(0) = -Infinity)
@@ -736,12 +737,15 @@ const generateReturn = (geometricMean, logVolatility, z) => {
   // (probability of |z| > 5 is ~0.00006%, essentially never happens naturally)
   z = Math.max(-5, Math.min(5, z));
 
+  // Convert simple std dev to log std dev: σ_log = sqrt(ln(1 + (σ_simple / (1 + g))²))
+  // This ensures the simple return distribution has the correct standard deviation
+  const logVolatility = Math.sqrt(Math.log(1 + (simpleStdDev / (1 + geometricMean)) ** 2));
+
   // Convert geometric mean to log return mean: μ_log = ln(1 + g)
   // This ensures the median of (1 + R) equals (1 + g)
   const logMean = Math.log(1 + geometricMean);
 
-  // Use volatility directly as log return std dev (standard financial convention)
-  // logVolatility is the annualized std dev of continuously compounded returns
+  // Log return: normally distributed with mean μ_log and std dev σ_log
   const logReturn = logMean + logVolatility * z;
 
   // Convert to simple return: R = exp(log_return) - 1
