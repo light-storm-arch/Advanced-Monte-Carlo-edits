@@ -1293,7 +1293,7 @@ const runSimulation = (params, numSims) => {
   const getPercentile = (arr, p) => arr[Math.min(Math.floor(arr.length * p), arr.length - 1)];
   const sortedResults = [...results].sort((a, b) => a.endingValue - b.endingValue);
   const percentilePaths = {}, percentileDetails = {};
-  [0.1, 0.25, 0.5, 0.75, 0.9].forEach(p => {
+  [0.1, 0.25, 0.5, 0.75, 0.9, 0.99].forEach(p => {
     const idx = Math.min(Math.floor(sortedResults.length * p), sortedResults.length - 1);
     percentilePaths[`p${Math.round(p * 100)}`] = sortedResults[idx].path;
     percentileDetails[`p${Math.round(p * 100)}`] = sortedResults[idx].detailedPath;
@@ -1339,7 +1339,7 @@ const runSimulation = (params, numSims) => {
 
   return {
     successRate,
-    percentileEnding: { p10: getPercentile(endingValues, 0.1), p25: getPercentile(endingValues, 0.25), p50: getPercentile(endingValues, 0.5), p75: getPercentile(endingValues, 0.75), p90: getPercentile(endingValues, 0.9) },
+    percentileEnding: { p10: getPercentile(endingValues, 0.1), p25: getPercentile(endingValues, 0.25), p50: getPercentile(endingValues, 0.5), p75: getPercentile(endingValues, 0.75), p90: getPercentile(endingValues, 0.9), p99: getPercentile(endingValues, 0.99) },
     percentilePaths,
     percentileDetails,
     returnPercentiles,
@@ -1532,11 +1532,12 @@ const generatePDF = (inputs, results) => {
   
   // Ending Portfolio Percentiles
   html += '<h2>Ending Portfolio Percentiles</h2>';
-  html += '<div class="grid" style="grid-template-columns:repeat(5,1fr)"><div class="card" style="text-align:center"><div class="label">10th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p10) + '</div></div>';
+  html += '<div class="grid" style="grid-template-columns:repeat(6,1fr)"><div class="card" style="text-align:center"><div class="label">10th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p10) + '</div></div>';
   html += '<div class="card" style="text-align:center"><div class="label">25th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p25) + '</div></div>';
   html += '<div class="card" style="text-align:center"><div class="label">50th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p50) + '</div></div>';
   html += '<div class="card" style="text-align:center"><div class="label">75th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p75) + '</div></div>';
-  html += '<div class="card" style="text-align:center"><div class="label">90th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p90) + '</div></div></div>';
+  html += '<div class="card" style="text-align:center"><div class="label">90th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p90) + '</div></div>';
+  html += '<div class="card" style="text-align:center"><div class="label">99th</div><div class="value" style="font-size:18px">' + formatCurrency(percentileEnding.p99) + '</div></div></div>';
   
   // Guardrails
   html += '<h2>Guardrail Analysis</h2><div class="grid-2"><div class="card" style="border-left-color:#4caf50"><div class="label">Upper Guardrail (' + (upperGuardrail * 100).toFixed(0) + '% Success)</div><div class="assumptions-row"><span>Portfolio Value</span><strong>' + formatCurrency(upperGuardrailPortfolio) + '</strong></div><div class="assumptions-row"><span>New Base Spending</span><strong>' + formatCurrency(upperGuardrailSpending) + '</strong></div>' + (survivorRatio != null ? '<div class="assumptions-row"><span>Survivor Spending</span><strong>' + formatCurrency(upperGuardrailSpending * survivorRatio) + '</strong></div>' : '') + '<div class="assumptions-row"><span>Spending Change</span><strong style="color:#4caf50">+' + formatCurrency(upperGuardrailSpending - baseSpending) + '</strong></div></div>';
@@ -1734,7 +1735,7 @@ function App() {
       
       const chartData = [];
       for (let y = 0; y <= planLength; y++) {
-        chartData.push({ year: currentYear + y, p10: mainResult.percentilePaths.p10[y], p25: mainResult.percentilePaths.p25[y], p50: mainResult.percentilePaths.p50[y], p75: mainResult.percentilePaths.p75[y], p90: mainResult.percentilePaths.p90[y] });
+        chartData.push({ year: currentYear + y, p10: mainResult.percentilePaths.p10[y], p25: mainResult.percentilePaths.p25[y], p50: mainResult.percentilePaths.p50[y], p75: mainResult.percentilePaths.p75[y], p90: mainResult.percentilePaths.p90[y], p99: mainResult.percentilePaths.p99[y] });
       }
       // Compute survivor spending ratio for guardrail display (only if different from base)
       const hasDifferentSurvivorSpending = filingStatus === 'mfj' && survivorSpending !== null && survivorSpending !== baseSpending;
@@ -1750,7 +1751,7 @@ function App() {
   const exportVerificationPDF = (percentile) => {
     if (!results || !results.percentileDetails || !results.percentileDetails[percentile]) return;
     const data = results.percentileDetails[percentile];
-    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : '90th';
+    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : percentile === 'p90' ? '90th' : '99th';
     
     let html = '<!DOCTYPE html><html><head><title>Verification Details - ' + percentileLabel + ' Percentile</title>';
     html += '<style>body{font-family:Arial,sans-serif;padding:30px;color:#333;font-size:11px}h1{color:#0f4c5c;font-size:18px}h2{color:#0f4c5c;font-size:14px;margin-top:20px}table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#0f4c5c;color:white;padding:6px 4px;text-align:right;font-size:10px}th:first-child{text-align:left}td{padding:5px 4px;border-bottom:1px solid #ddd;text-align:right;font-size:10px}td:first-child{text-align:left}.negative{color:#dc2626}.positive{color:#16a34a}tr:nth-child(even){background:#f9f9f9}.meta{color:#666;font-size:11px;margin-bottom:15px}</style></head><body>';
@@ -1804,7 +1805,7 @@ function App() {
     const yearData = results.percentileDetails[percentile][yearIndex];
     if (!yearData) return;
     const td = yearData.taxDetails || {};
-    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : '90th';
+    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : percentile === 'p90' ? '90th' : '99th';
     const filingLabel = td.filingStatus === 'single' ? 'Single' : td.filingStatus === 'mfj' ? 'Married Filing Jointly' : 'Head of Household';
     
     let html = '<!DOCTYPE html><html><head><title>Tax Calculation - Year ' + yearData.calYear + '</title>';
@@ -1945,7 +1946,7 @@ function App() {
   const exportTaxTablePDF = (percentile) => {
     if (!results || !results.percentileDetails || !results.percentileDetails[percentile]) return;
     const data = results.percentileDetails[percentile];
-    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : '90th';
+    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : percentile === 'p90' ? '90th' : '99th';
     
     let html = '<!DOCTYPE html><html><head><title>Tax Summary - ' + percentileLabel + ' Percentile</title>';
     html += '<style>body{font-family:Arial,sans-serif;padding:30px;color:#333;font-size:10px}h1{color:#0f4c5c;font-size:18px}table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#0f4c5c;color:white;padding:6px 4px;text-align:right;font-size:9px}th:first-child,th:nth-child(2){text-align:left}td{padding:4px;border-bottom:1px solid #ddd;text-align:right;font-size:9px}td:first-child,td:nth-child(2){text-align:left}.negative{color:#dc2626}tr:nth-child(even){background:#f9f9f9}.meta{color:#666;font-size:11px;margin-bottom:15px}</style></head><body>';
@@ -1991,7 +1992,7 @@ function App() {
   const exportAccountBalancesPDF = (percentile) => {
     if (!results || !results.percentileDetails || !results.percentileDetails[percentile]) return;
     const data = results.percentileDetails[percentile];
-    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : '90th';
+    const percentileLabel = percentile === 'p10' ? '10th' : percentile === 'p25' ? '25th' : percentile === 'p50' ? '50th' : percentile === 'p75' ? '75th' : percentile === 'p90' ? '90th' : '99th';
     
     let html = '<!DOCTYPE html><html><head><title>Account Balances - ' + percentileLabel + ' Percentile</title>';
     html += '<style>';
@@ -2530,8 +2531,8 @@ function App() {
 
             <div className="card card-accent p-6">
               <h3 className="font-display text-xl font-semibold mb-5 text-amber-200">Ending Portfolio Percentiles</h3>
-              <div className="grid grid-cols-5 gap-4">
-                {[{l:'10th',v:results.percentileEnding.p10,c:'text-red-300'},{l:'25th',v:results.percentileEnding.p25,c:'text-orange-300'},{l:'50th',v:results.percentileEnding.p50,c:'text-amber-300'},{l:'75th',v:results.percentileEnding.p75,c:'text-green-300'},{l:'90th',v:results.percentileEnding.p90,c:'text-emerald-300'}].map(p=>(
+              <div className="grid grid-cols-6 gap-4">
+                {[{l:'10th',v:results.percentileEnding.p10,c:'text-red-300'},{l:'25th',v:results.percentileEnding.p25,c:'text-orange-300'},{l:'50th',v:results.percentileEnding.p50,c:'text-amber-300'},{l:'75th',v:results.percentileEnding.p75,c:'text-green-300'},{l:'90th',v:results.percentileEnding.p90,c:'text-emerald-300'},{l:'99th',v:results.percentileEnding.p99,c:'text-cyan-300'}].map(p=>(
                   <div key={p.l} className="text-center bg-slate-800/50 rounded-xl p-4">
                     <div className="text-sm text-slate-400 mb-1">{p.l}</div>
                     <div className={`text-xl font-semibold ${p.c}`}>{formatCurrency(p.v)}</div>
@@ -2555,6 +2556,7 @@ function App() {
                   <Recharts.Line type="monotone" dataKey="p50" name="50th (Median)" stroke="#22c55e" strokeWidth={3} dot={false} />
                   <Recharts.Line type="monotone" dataKey="p75" name="75th" stroke="#3b82f6" strokeWidth={2} dot={false} />
                   <Recharts.Line type="monotone" dataKey="p90" name="90th" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                  <Recharts.Line type="monotone" dataKey="p99" name="99th" stroke="#06b6d4" strokeWidth={2} dot={false} />
                 </Recharts.LineChart>
               </Recharts.ResponsiveContainer>
             </div>
@@ -2576,7 +2578,7 @@ function App() {
                   </p>
                   
                   <div className="flex gap-2 mb-4">
-                    {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'}].map(p => (
+                    {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'},{key:'p99',label:'99th'}].map(p => (
                       <button 
                         key={p.key}
                         onClick={() => setVerificationPercentile(p.key)}
@@ -2666,7 +2668,7 @@ function App() {
                   </div>
                   
                   <p className="text-xs text-slate-500 mt-3">
-                    Note: This is actual simulation data with random returns. The {verificationPercentile === 'p50' ? '50th' : verificationPercentile === 'p10' ? '10th' : verificationPercentile === 'p25' ? '25th' : verificationPercentile === 'p75' ? '75th' : '90th'} percentile simulation ended with {formatCurrency(results.percentileEnding[verificationPercentile])}.
+                    Note: This is actual simulation data with random returns. The {verificationPercentile === 'p50' ? '50th' : verificationPercentile === 'p10' ? '10th' : verificationPercentile === 'p25' ? '25th' : verificationPercentile === 'p75' ? '75th' : verificationPercentile === 'p90' ? '90th' : '99th'} percentile simulation ended with {formatCurrency(results.percentileEnding[verificationPercentile])}.
                   </p>
                 </div>
               )}
@@ -2690,7 +2692,7 @@ function App() {
                   <div className="flex items-center gap-4 mb-4">
                     <span className="text-sm text-slate-400">Percentile:</span>
                     <div className="flex gap-2">
-                      {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'}].map(p => (
+                      {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'},{key:'p99',label:'99th'}].map(p => (
                         <button 
                           key={p.key}
                           onClick={() => setVerificationPercentile(p.key)}
@@ -3030,7 +3032,7 @@ function App() {
                   <div className="flex items-center gap-4 mb-4">
                     <span className="text-sm text-slate-400">Percentile:</span>
                     <div className="flex gap-2">
-                      {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'}].map(p => (
+                      {[{key:'p10',label:'10th'},{key:'p25',label:'25th'},{key:'p50',label:'50th'},{key:'p75',label:'75th'},{key:'p90',label:'90th'},{key:'p99',label:'99th'}].map(p => (
                         <button 
                           key={p.key}
                           onClick={() => setAccountBalancesPercentile(p.key)}
