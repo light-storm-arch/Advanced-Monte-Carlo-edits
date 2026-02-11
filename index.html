@@ -1366,8 +1366,8 @@ const findPortfolioForSuccessRate = (params, targetRate, numSims) => {
       client1Roth: (params.client1Roth || 0) * scale,
       client2Roth: (params.client2Roth || 0) * scale
     };
-    const r = runSimulation(scaledParams, Math.min(numSims, 2000)); 
-    if (Math.abs(r.successRate - targetRate) < 0.005) return mid; 
+    const r = runSimulation(scaledParams, numSims);
+    if (Math.abs(r.successRate - targetRate) < 0.005) return mid;
     if (r.successRate < targetRate) low = mid; else high = mid; 
   }
   return (low + high) / 2;
@@ -1395,7 +1395,7 @@ const findSpendingForSuccessRate = (params, pv, targetRate, numSims) => {
   for (let i = 0; i < 15; i++) {
     const mid = (low + high) / 2;
     const scaledSurvivor = survivorRatio != null ? mid * survivorRatio : null;
-    const r = runSimulation({ ...scaledParams, baseSpending: mid, survivorSpending: scaledSurvivor }, Math.min(numSims, 2000));
+    const r = runSimulation({ ...scaledParams, baseSpending: mid, survivorSpending: scaledSurvivor }, numSims);
     if (Math.abs(r.successRate - targetRate) < 0.005) return mid;
     if (r.successRate > targetRate) low = mid; else high = mid;
   }
@@ -1649,7 +1649,7 @@ function App() {
   const [targetSuccessRate, setTargetSuccessRate] = useState(80);
   const [upperGuardrail, setUpperGuardrail] = useState(90);
   const [lowerGuardrail, setLowerGuardrail] = useState(70);
-  const [numSimulations, setNumSimulations] = useState(1500);
+  const [numSimulations, setNumSimulations] = useState(3000);
   const [goals, setGoals] = useState([]);
   const [incomeSources, setIncomeSources] = useState([]);
   const [results, setResults] = useState(null);
