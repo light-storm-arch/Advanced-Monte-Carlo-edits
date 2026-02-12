@@ -947,7 +947,29 @@ const runSimulation = (params, numSims) => {
     }
   }
   
+  // Antithetic variates: even sims use original z-values, odd sims reuse with negated sign
+  // This pairs each path with its "mirror" path to reduce estimator variance at no extra cost
+  let storedZAllYears = null;
+
   for (let sim = 0; sim < numSims; sim++) {
+    const isAntithetic = sim % 2 === 1;
+    const antitheticSign = isAntithetic ? -1 : 1;
+
+    // On even sims, pre-generate independent standard normals for all years
+    if (!isAntithetic) {
+      storedZAllYears = [];
+      for (let y = 0; y < planLength; y++) {
+        const zIndep = new Array(NUM_ASSETS);
+        for (let k = 0; k < NUM_ASSETS; k += 2) {
+          const ua = Math.random() || 1e-15, ub = Math.random();
+          const r = Math.sqrt(-2 * Math.log(ua));
+          zIndep[k] = r * Math.cos(2 * Math.PI * ub);
+          if (k + 1 < NUM_ASSETS) zIndep[k + 1] = r * Math.sin(2 * Math.PI * ub);
+        }
+        storedZAllYears.push(zIndep);
+      }
+    }
+
     // Track accounts by owner for RMD calculations
     let c1PreTax = initialClient1PreTax, c2PreTax = initialClient2PreTax;
     let c1Roth = initialClient1Roth, c2Roth = initialClient2Roth;
@@ -1053,20 +1075,12 @@ const runSimulation = (params, numSims) => {
       const socialSecurityIncome = cachedIncome.socialSecurity;
       
       // Generate 12 correlated asset class returns using Cholesky decomposition
-      // Step 1: Generate independent standard normals via Box-Muller (need 12, so 6 pairs)
-      const zIndep = new Array(NUM_ASSETS);
-      for (let k = 0; k < NUM_ASSETS; k += 2) {
-        // Guard against Math.random() returning exactly 0 (causes log(0) = -Infinity)
-        const ua = Math.random() || 1e-15, ub = Math.random();
-        const r = Math.sqrt(-2 * Math.log(ua));
-        zIndep[k] = r * Math.cos(2 * Math.PI * ub);
-        if (k + 1 < NUM_ASSETS) zIndep[k + 1] = r * Math.sin(2 * Math.PI * ub);
-      }
-      // Step 2: Multiply by Cholesky factor to get correlated normals
+      // Use pre-generated z-values with antithetic sign (sign=+1 for original, -1 for mirror path)
+      const zIndep = storedZAllYears[year];
       const zCorr = new Array(NUM_ASSETS);
       for (let i = 0; i < NUM_ASSETS; i++) {
         let s = 0;
-        for (let j = 0; j <= i; j++) s += choleskyL[i][j] * zIndep[j];
+        for (let j = 0; j <= i; j++) s += choleskyL[i][j] * (antitheticSign * zIndep[j]);
         zCorr[i] = s;
       }
       // Step 3: Per-asset rebalancing model
