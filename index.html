@@ -737,9 +737,14 @@ const generateReturn = (geometricMean, simpleStdDev, z) => {
   // (probability of |z| > 5 is ~0.00006%, essentially never happens naturally)
   z = Math.max(-5, Math.min(5, z));
 
-  // Convert simple std dev to log std dev: σ_log = sqrt(ln(1 + (σ_simple / (1 + g))²))
-  // This ensures the simple return distribution has the correct standard deviation
-  const logVolatility = Math.sqrt(Math.log(1 + (simpleStdDev / (1 + geometricMean)) ** 2));
+  // Convert simple std dev to log std dev using exact lognormal variance relationship.
+  // Given R = exp(X) - 1 with X ~ N(μ, σ²) and μ = ln(1+g):
+  //   Var(R) = (e^σ² - 1) · e^(2μ + σ²) = (1+g)² · e^σ² · (e^σ² - 1)
+  // Setting Var(R) = s² and letting A = (s/(1+g))², t = e^σ²:
+  //   t² - t = A  →  t = (1 + √(1 + 4A)) / 2  →  σ = √ln(t)
+  const A = (simpleStdDev / (1 + geometricMean)) ** 2;
+  const t = (1 + Math.sqrt(1 + 4 * A)) / 2;
+  const logVolatility = Math.sqrt(Math.log(t));
 
   // Convert geometric mean to log return mean: μ_log = ln(1 + g)
   // This ensures the median of (1 + R) equals (1 + g)
