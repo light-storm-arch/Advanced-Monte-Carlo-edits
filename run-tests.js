@@ -361,7 +361,9 @@ const generateReturn = (geometricMean, simpleStdDev, z) => {
     z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
   z = Math.max(-5, Math.min(5, z));
-  const logVolatility = Math.sqrt(Math.log(1 + (simpleStdDev / (1 + geometricMean)) ** 2));
+  const A = (simpleStdDev / (1 + geometricMean)) ** 2;
+  const t = (1 + Math.sqrt(1 + 4 * A)) / 2;
+  const logVolatility = Math.sqrt(Math.log(t));
   const logMean = Math.log(1 + geometricMean);
   const logReturn = logMean + logVolatility * z;
   return Math.exp(logReturn) - 1;
