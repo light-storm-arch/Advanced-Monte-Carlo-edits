@@ -809,12 +809,18 @@ const PercentageInputNullable = ({ value, onChange, placeholder }) => {
 // SIMULATION ENGINE: Monte Carlo & Guardrail Analysis
 // =============================================================================
 const runSimulation = (params, numSims) => {
-  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, choleskyL, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1RmdAge, client2RmdAge, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
+  const { preTaxBalance, rothBalance, taxableBalance, taxableBasis, stockAllocation, filingStatus, stateTaxRate, planLength, assetWeights, baseSpending, survivorSpending, baseInflation, goals, incomeSources, currentYear, spendingMode, phase2Year, phase2Reduction, phase3Year, phase3Reduction, clientAge, client1Age, client2Age, client1RmdAge, client2RmdAge, client1PreTax, client2PreTax, client1Roth, client2Roth, client1PlanLength, client2PlanLength } = params;
 
-  // Validate Cholesky decomposition was successful before running simulation
-  if (!choleskyL) {
-    throw new Error('Simulation failed: Cholesky decomposition of correlation matrix is null. The asset correlation matrix may not be positive-definite.');
-  }
+  // Portfolio-level return parameters: geometric mean and simple std dev
+  // Correlations are captured via the full covariance matrix (σᵢ × σⱼ × ρᵢⱼ)
+  const portfolioGeometricMean = assetWeights.reduce((s, w, i) => s + w * ASSET_RETURNS[i], 0);
+  const portfolioSimpleStdDev = Math.sqrt((() => {
+    let v = 0;
+    for (let i = 0; i < NUM_ASSETS; i++)
+      for (let j = 0; j < NUM_ASSETS; j++)
+        v += assetWeights[i] * assetWeights[j] * ASSET_STDDEVS[i] * ASSET_STDDEVS[j] * ASSET_CORR_FIXED[i][j];
+    return v;
+  })());
 
   const results = [], allPaths = [];
   const totalPortfolio = preTaxBalance + rothBalance + taxableBalance;
@@ -960,18 +966,12 @@ const runSimulation = (params, numSims) => {
     const isAntithetic = sim % 2 === 1;
     const antitheticSign = isAntithetic ? -1 : 1;
 
-    // On even sims, pre-generate independent standard normals for all years
+    // On even sims, pre-generate one standard normal per year (antithetic pairs negate it)
     if (!isAntithetic) {
       storedZAllYears = [];
       for (let y = 0; y < planLength; y++) {
-        const zIndep = new Array(NUM_ASSETS);
-        for (let k = 0; k < NUM_ASSETS; k += 2) {
-          const ua = Math.random() || 1e-15, ub = Math.random();
-          const r = Math.sqrt(-2 * Math.log(ua));
-          zIndep[k] = r * Math.cos(2 * Math.PI * ub);
-          if (k + 1 < NUM_ASSETS) zIndep[k + 1] = r * Math.sin(2 * Math.PI * ub);
-        }
-        storedZAllYears.push(zIndep);
+        const u1 = Math.random() || 1e-15, u2 = Math.random();
+        storedZAllYears.push(Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2));
       }
     }
 
@@ -1079,40 +1079,11 @@ const runSimulation = (params, numSims) => {
       const taxFreeIncome = cachedIncome.taxFree;
       const socialSecurityIncome = cachedIncome.socialSecurity;
       
-      // Generate 12 correlated asset class returns using Cholesky decomposition
-      // Use pre-generated z-values with antithetic sign (sign=+1 for original, -1 for mirror path)
-      const zIndep = storedZAllYears[year];
-      const zCorr = new Array(NUM_ASSETS);
-      for (let i = 0; i < NUM_ASSETS; i++) {
-        let s = 0;
-        for (let j = 0; j <= i; j++) s += choleskyL[i][j] * (antitheticSign * zIndep[j]);
-        zCorr[i] = s;
-      }
-      // Step 3: Per-asset rebalancing model
-      // Each asset grows independently, then portfolio is rebalanced to target weights
-      // This ensures each asset compounds at its geometric mean while capturing rebalancing effects
-
-      // Start with notional $1 portfolio allocated by target weights
-      const assetValues = new Array(NUM_ASSETS);
-      for (let i = 0; i < NUM_ASSETS; i++) {
-        assetValues[i] = assetWeights[i]; // Weight represents fraction of $1
-      }
-
-      // Apply individual asset returns (each asset grows/shrinks independently)
-      for (let i = 0; i < NUM_ASSETS; i++) {
-        if (assetValues[i] > 0) {
-          const assetReturn = generateReturn(ASSET_RETURNS[i], ASSET_STDDEVS[i], zCorr[i]);
-          assetValues[i] *= (1 + assetReturn);
-        }
-      }
-
-      // Calculate portfolio return from total value change
-      // Started at $1, so yearReturn = totalValue - 1
-      const totalValue = assetValues.reduce((sum, v) => sum + v, 0);
-      const yearReturn = totalValue - 1;
-
-      // Rebalancing happens implicitly: next iteration starts fresh with target weights
-      // This models annual rebalancing back to target allocation
+      // Single portfolio-level lognormal return per year.
+      // Geometric mean = Σ(wᵢ × gᵢ), std dev = √(wᵀ × Cov × w) capturing the full correlation matrix.
+      // Antithetic variates: even sims use +z, odd sims use -z (mirror path).
+      const z = antitheticSign * storedZAllYears[year];
+      const yearReturn = generateReturn(portfolioGeometricMean, portfolioSimpleStdDev, z);
 
       // =========================================================================
       // BEGINNING OF YEAR: Process all withdrawals and income BEFORE applying returns
@@ -1717,7 +1688,7 @@ function App() {
         preTaxBalance, rothBalance, taxableBalance, taxableBasis,
         client1PreTax, client2PreTax, client1Roth, client2Roth,
         stockAllocation: stockAllocation / 100, filingStatus, stateTaxRate: stateTaxRate / 100,
-        planLength, assetWeights, choleskyL: CHOLESKY_L,
+        planLength, assetWeights,
         baseSpending, survivorSpending: filingStatus === 'mfj' ? (survivorSpending !== null ? survivorSpending : baseSpending) : null,
         baseInflation: baseInflation / 100, goals, incomeSources,
         currentYear, clientAge, client1Age, client2Age: filingStatus === 'mfj' ? client2Age : 0,
