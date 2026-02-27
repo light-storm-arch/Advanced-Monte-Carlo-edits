@@ -1210,6 +1210,48 @@ test('Qualified dividends and interest income from taxable balance', () => {
 });
 
 // ============================================================
+// 18. Portfolio CAGR Convergence
+// ============================================================
+section('18. Portfolio CAGR Convergence');
+
+test('Single asset CAGR converges to geometric mean input (10 000 draws)', () => {
+  const g = 0.07, s = 0.18, T = 10000;
+  let logSum = 0;
+  for (let i = 0; i < T; i++) {
+    const u1 = Math.random() || 1e-15, u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    logSum += Math.log(1 + generateReturn(g, s, z));
+  }
+  const simulatedCAGR = Math.exp(logSum / T) - 1;
+  const withinTolerance = Math.abs(simulatedCAGR - g) < 0.005;
+  return withinTolerance
+    ? { pass: true, detail: `Simulated CAGR=${(simulatedCAGR * 100).toFixed(2)}%, input=${(g * 100).toFixed(2)}% (within 0.5%)` }
+    : { detail: `CAGR=${(simulatedCAGR * 100).toFixed(2)}% deviates from ${(g * 100).toFixed(2)}% by more than 0.5%` };
+});
+
+test('Portfolio-level CAGR matches weighted geometric mean — 60/40 split (10 000 draws)', () => {
+  // 60% large cap value (g=7%, s=18%), 40% intermediate bonds (g=4.5%, s=6%), corr≈0.35
+  const portfolioG = 0.60 * 0.07 + 0.40 * 0.045; // = 0.06
+  const portfolioS = Math.sqrt(
+    0.60 * 0.60 * 0.18 * 0.18 +
+    2 * 0.60 * 0.40 * 0.18 * 0.06 * 0.35 +
+    0.40 * 0.40 * 0.06 * 0.06
+  );
+  const T = 10000;
+  let logSum = 0;
+  for (let i = 0; i < T; i++) {
+    const u1 = Math.random() || 1e-15, u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    logSum += Math.log(1 + generateReturn(portfolioG, portfolioS, z));
+  }
+  const simulatedCAGR = Math.exp(logSum / T) - 1;
+  const withinTolerance = Math.abs(simulatedCAGR - portfolioG) < 0.005;
+  return withinTolerance
+    ? { pass: true, detail: `Simulated CAGR=${(simulatedCAGR * 100).toFixed(2)}%, target=${(portfolioG * 100).toFixed(2)}% (within 0.5%)` }
+    : { detail: `CAGR=${(simulatedCAGR * 100).toFixed(2)}% deviates from ${(portfolioG * 100).toFixed(2)}% by more than 0.5%` };
+});
+
+// ============================================================
 // SUMMARY
 // ============================================================
 console.log(`\n${'='.repeat(60)}`);
